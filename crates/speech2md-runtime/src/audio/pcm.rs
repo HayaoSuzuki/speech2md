@@ -69,3 +69,28 @@ fn map_read_only(file: &File) -> Result<Mmap, RuntimeError> {
     // mapping until it removes the directory after the mapping is dropped.
     unsafe { MmapOptions::new().map(file).map_err(RuntimeError::Io) }
 }
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+    use tempfile::TempDir;
+
+    use super::store_pcm;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        #[test]
+        fn file_backed_pcm_preserves_every_sample_bit(
+            samples in prop::collection::vec(any::<f32>().prop_filter("finite", |value| value.is_finite()), 1..2_048)
+        ) {
+            let root = TempDir::new().expect("temporary root");
+            let stored = store_pcm(&samples, root.path()).expect("nonempty PCM can be stored");
+
+            prop_assert_eq!(
+                stored.samples().iter().map(|sample| sample.to_bits()).collect::<Vec<_>>(),
+                samples.iter().map(|sample| sample.to_bits()).collect::<Vec<_>>()
+            );
+        }
+    }
+}

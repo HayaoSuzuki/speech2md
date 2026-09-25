@@ -18,9 +18,10 @@ fn escape_commonmark(text: &str) -> String {
 }
 
 fn escape_block_text(text: &str) -> String {
-    let mut escaped = String::with_capacity(text.len());
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    let mut escaped = String::with_capacity(normalized.len());
     let mut at_line_start = true;
-    for character in text.chars() {
+    for character in normalized.chars() {
         match character {
             ' ' if at_line_start => escaped.push_str("&#32;"),
             '\t' if at_line_start => escaped.push_str("&#9;"),

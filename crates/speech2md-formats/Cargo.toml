@@ -12,4 +12,5 @@ workspace = true
 speech2md-core = { path = "../speech2md-core" }
 
 [dev-dependencies]
+proptest = "1"
 pulldown-cmark = "0.13"

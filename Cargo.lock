@@ -460,6 +460,7 @@ dependencies = [
 name = "speech2md-formats"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "pulldown-cmark",
  "speech2md-core",
 ]
@@ -470,6 +471,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "memmap2",
+ "proptest",
  "rubato",
  "speech2md-core",
  "speech2md-formats",

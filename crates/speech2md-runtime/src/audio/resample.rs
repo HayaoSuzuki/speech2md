@@ -71,3 +71,40 @@ fn append_resampled(
     destination.extend(channel);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+
+    use super::{OUTPUT_SAMPLE_RATE, resample};
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        #[test]
+        fn sixteen_kilohertz_preserves_every_sample(
+            samples in prop::collection::vec(-1.0_f32..=1.0, 1..2_048)
+        ) {
+            let output = resample(&samples, OUTPUT_SAMPLE_RATE).expect("valid PCM is accepted");
+
+            prop_assert_eq!(
+                output.iter().map(|sample| sample.to_bits()).collect::<Vec<_>>(),
+                samples.iter().map(|sample| sample.to_bits()).collect::<Vec<_>>()
+            );
+        }
+
+        #[test]
+        fn supported_rates_produce_the_integer_ceiling_length_and_finite_samples(
+            samples in prop::collection::vec(-1.0_f32..=1.0, 1..8_192),
+            input_rate in prop::sample::select(vec![8_000_u32, 22_050, 32_000, 44_100, 48_000]),
+        ) {
+            let output = resample(&samples, input_rate).expect("supported sample rate is accepted");
+            let expected_length = samples.len()
+                .saturating_mul(usize::try_from(OUTPUT_SAMPLE_RATE).expect("u32 fits usize"))
+                .div_ceil(usize::try_from(input_rate).expect("selected u32 fits usize"));
+
+            prop_assert_eq!(output.len(), expected_length);
+            prop_assert!(output.iter().all(|sample| sample.is_finite()));
+        }
+    }
+}
