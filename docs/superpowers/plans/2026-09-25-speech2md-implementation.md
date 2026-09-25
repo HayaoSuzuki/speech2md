@@ -25,6 +25,9 @@
 - `speech2md-core`と`speech2md-formats`はline coverageとfunction coverageを100%にする。
 - `speech2md-cli`とネイティブI/O以外の`speech2md-runtime`も100%を目標とし、未到達行は外部依存またはOS依存である理由と代替検証を`docs/testing.md`へ記録する。
 - カバレッジ対象から除外するためだけの`cfg(coverage)`、到達不能化、ファイル除外は行わない。
+- 各テストは専用の`TempDir`、fake、環境値を使い、別テストが作った状態や実行順序へ依存しない。
+- CIでは通常の並列テストに加え、nightly libtestの`--shuffle --test-threads=1`を3回実行し、順序依存を検出する。
+- shuffle失敗時はログに出たseedを`--shuffle-seed SEED`へ渡してローカル再現する。
 
 ## Review Focus
 
@@ -767,7 +770,11 @@ WAV入力から実バイナリ相当のcommand handlerを通し、話者と時�
 
 四つのモデル環境変数と複数話者音声がある場合に、実CLIで`transcribe --speakers 2`を実行する。出力本文の完全一致は求めず、2種類以下の話者ラベル、時刻順、非空本文、CommonMark解析成功を検証する。
 
-- [ ] **Step 3: Windows CIを作る**
+- [ ] **Step 3: テストの状態分離を監査する**
+
+全テストについて、固定パス、process-globalなcurrent directory変更、共有可能な固定port、前のテストが作るファイル、実行順を前提にしていないことを確認する。環境変数を変更する必要があるテストは子プロセスへ閉じ込める。`serial_test`による順序固定で問題を隠さず、共有資源を依存注入または`TempDir`へ置き換える。
+
+- [ ] **Step 4: Windows CIを作る**
 
 ```yaml
 jobs:
@@ -778,21 +785,29 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy, llvm-tools-preview
+      - run: rustup toolchain install nightly --profile minimal
       - uses: taiki-e/install-action@cargo-llvm-cov
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - name: Test three random sequential orders
+        shell: pwsh
+        run: |
+          1..3 | ForEach-Object {
+            cargo +nightly test --workspace -- -Z unstable-options --shuffle --test-threads=1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - run: cargo llvm-cov -p speech2md-core --fail-under-lines 100 --fail-under-functions 100
       - run: cargo llvm-cov -p speech2md-formats --fail-under-lines 100 --fail-under-functions 100
       - run: cargo llvm-cov --workspace --html --output-dir target/coverage
       - run: cargo build --release -p speech2md-cli
 ```
 
-- [ ] **Step 4: Releaseバイナリの依存を検査する**
+- [ ] **Step 5: Releaseバイナリの依存を検査する**
 
 Windows上で`dumpbin /dependents target\release\speech2md.exe`を実行し、Visual C++ランタイム以外の未同梱DLLがないことを記録する。`speech2md --help`と`speech2md doctor`をクリーンな一時ディレクトリで実行する。
 
-- [ ] **Step 5: 全検証を通す**
+- [ ] **Step 6: 全検証を通す**
 
 Run: `cargo fmt --all --check`
 Expected: PASS.
@@ -802,6 +817,9 @@ Expected: PASS.
 
 Run: `cargo test --workspace`
 Expected: PASS with model tests ignored.
+
+Run three times: `cargo +nightly test --workspace -- -Z unstable-options --shuffle --test-threads=1`
+Expected: PASS three times; each invocation prints its shuffle seed. On failure, rerun with `--shuffle-seed SEED --test-threads=1` using the printed seed.
 
 Run: `cargo llvm-cov -p speech2md-core --fail-under-lines 100 --fail-under-functions 100 --show-missing-lines`
 Expected: PASS at 100%.
@@ -815,7 +833,7 @@ Expected: generate a workspace report; every uncovered production line has an ex
 Run: `cargo build --release -p speech2md-cli`
 Expected: PASS and create `target/release/speech2md.exe`.
 
-- [ ] **Step 6: コミットする**
+- [ ] **Step 7: コミットする**
 
 ```bash
 git add .github .gitignore crates
@@ -890,6 +908,8 @@ git commit -m "docs: add setup and evaluation guide"
 - [ ] `cargo fmt --all --check`が成功する。
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`が成功する。
 - [ ] `cargo test --workspace`がモデルとネットワークなしで成功する。
+- [ ] ランダム順かつ単一スレッドのworkspaceテストが異なるseedで3回成功する。
+- [ ] テストが固定パス、固定port、current directory変更、別テストの生成物へ依存しない。
 - [ ] `speech2md-core`と`speech2md-formats`のline coverageとfunction coverageが100%になる。
 - [ ] workspace全体のカバレッジレポートを生成し、100%未達のproduction lineごとに理由と代替検証を記録する。
 - [ ] 外部依存で妥当な理由がない限り、`speech2md-runtime`と`speech2md-cli`もline coverage 100%になる。
