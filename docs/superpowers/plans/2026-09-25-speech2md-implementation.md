@@ -247,7 +247,21 @@ Expected: FAIL with unresolved `assign_speakers`.
 - [ ] **Step 3: 半開区間の重複と決定的な割り当てを実装する**
 
 ```rust
-pub struct AssignmentConfig { pub min_overlap_ratio: f32 }
+pub struct OverlapRatio(u16);
+
+impl OverlapRatio {
+    pub fn from_basis_points(value: u16) -> Result<Self, InvalidOverlapRatio> {
+        (value <= 10_000).then_some(Self(value)).ok_or(InvalidOverlapRatio)
+    }
+
+    pub fn is_met_by(self, overlap_ms: u64, duration_ms: u64) -> bool {
+        self.0 == 0 || (duration_ms > 0
+            && u128::from(duration_ms) * u128::from(self.0)
+                <= u128::from(overlap_ms) * 10_000)
+    }
+}
+
+pub struct AssignmentConfig { pub min_overlap_ratio: OverlapRatio }
 
 pub fn overlap_ms(left: TimeSpan, right: TimeSpan) -> u64 {
     left.end.as_millis().min(right.end.as_millis())
@@ -263,7 +277,7 @@ pub fn assign_speakers(
 }
 ```
 
-`assign_one`はtoken時刻がある場合に話者境界で分割し、各区間について`overlap_ms`降順、`SpeakerId`昇順で候補を選ぶ。`overlap_ms / segment.duration_ms`が`min_overlap_ratio`未満なら`speaker=None`を返す。durationが0なら比率を0として扱う。
+`assign_one`はtoken時刻がある場合に話者境界で分割し、各区間について`overlap_ms`降順、`SpeakerId`昇順で候補を選ぶ。除算や浮動小数点を使わず、`u128`へ拡張した交差乗算で重複率と`min_overlap_ratio`を比較する。durationが0なら、閾値0の場合を除いて`speaker=None`にする。
 
 - [ ] **Step 4: 正規化の失敗テストを書く**
 

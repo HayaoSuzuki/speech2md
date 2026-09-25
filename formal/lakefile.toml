@@ -1,0 +1,14 @@
+name = "speech2md-formal"
+version = "0.1.0"
+defaultTargets = ["Speech2mdTests", "testgen"]
+
+[[lean_lib]]
+name = "Speech2md"
+
+[[lean_exe]]
+name = "Speech2mdTests"
+root = "Speech2mdTests"
+
+[[lean_exe]]
+name = "testgen"
+root = "TestGen"
