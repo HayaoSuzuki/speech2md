@@ -95,7 +95,7 @@ Rust バインディングは `whisper-rs` を第一候補とし、多言語モ�
 
 話者分離には sherpa-onnx の公式 Rust API を使用する。
 話者セグメンテーションモデル、話者埋め込みモデル、クラスタリングを組み合わせる。
-話者数は自動推定を既定値とし、正確な話者数または最小値と最大値を利用者が指定できるようにする。
+話者数は自動推定を既定値とし、正確な話者数を利用者が指定できるようにする。
 
 whisper.cpp と sherpa-onnx の型は `speech2md-runtime` から外へ公開しない。
 エンジン更新による API 差分はアダプター内で吸収し、コアのデータモデルを変更しない。
@@ -186,8 +186,6 @@ speech2md transcribe INPUT
   --output OUTPUT
   --whisper base|small
   --speakers N
-  --min-speakers N
-  --max-speakers N
   --prompt TEXT
   --force
 ```
