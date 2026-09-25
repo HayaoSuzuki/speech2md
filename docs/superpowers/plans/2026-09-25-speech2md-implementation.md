@@ -28,6 +28,9 @@
 - 各テストは専用の`TempDir`、fake、環境値を使い、別テストが作った状態や実行順序へ依存しない。
 - CIでは通常の並列テストに加え、nightly libtestの`--shuffle --test-threads=1`を3回実行し、順序依存を検出する。
 - shuffle失敗時はログに出たseedを`--shuffle-seed SEED`へ渡してローカル再現する。
+- GitHub Actionsの通常CIと手動CIは`ubuntu-latest`だけを使い、GitHub-hosted Windows runnerを使わない。
+- 通常CIはモデル、SRV-DB、長時間音声を取得せず、モデル不要のテストだけを実行する。
+- 実モデル推論は`workflow_dispatch`の手動CI、SRV-DB、1時間と3時間の性能、Windowsバイナリはローカル検証として分離する。
 
 ## Review Focus
 
@@ -495,6 +498,7 @@ pub struct ModelSpec {
 ```
 
 Windowsでは`%LOCALAPPDATA%\speech2md\models`を既定とし、テストでは明示した一時ルートを使う。マニフェストは`include_str!`でバイナリへ埋め込む。
+`SPEECH2MD_MODEL_DIR`が設定されている場合はその絶対パスを優先し、CIと隔離テストでユーザー領域を変更せずに済むようにする。
 
 - [ ] **Step 4: ストリーミング取得、検証、原子的確定を実装する**
 
@@ -553,10 +557,10 @@ Expected: FAIL with unresolved adapter functions.
 
 - [ ] **Step 4: 小さなローカルモデル統合テストをignoredで追加する**
 
-`SPEECH2MD_WHISPER_MODEL`と`SPEECH2MD_TEST_AUDIO`がある場合だけ実行し、区間が時刻順で、日本語設定が適用され、テキストが空でないことを検証する。
+`SPEECH2MD_MODEL_DIR`に導入済みモデルがある場合だけ実行し、リポジトリの短い自作fixtureを使って、区間が時刻順で、日本語設定が適用され、テキストが空でないことを検証する。
 
 Run: `cargo test -p speech2md-runtime --test whisper_model -- --ignored`
-Expected: PASS when the two environment variables point to installed local assets; otherwise the test prints the required variables and returns without downloading.
+Expected: PASS when `SPEECH2MD_MODEL_DIR` points to installed local assets; otherwise the test prints the required setup and returns without downloading.
 
 - [ ] **Step 5: 通常テストを通す**
 
@@ -606,7 +610,7 @@ Expected: FAIL with unresolved diarization APIs.
 
 - [ ] **Step 4: モデル必須のignored統合テストを書く**
 
-`SPEECH2MD_SEGMENTATION_MODEL`、`SPEECH2MD_EMBEDDING_MODEL`、`SPEECH2MD_MULTI_SPEAKER_AUDIO`を明示したときだけ実行し、2話者指定で2種類のIDと妥当な時刻区間が返ることを検証する。
+`SPEECH2MD_MODEL_DIR`に導入済み話者モデルがある場合だけ実行し、リポジトリの短い自作複数話者fixtureを使って、2話者指定で2種類のIDと妥当な時刻区間が返ることを検証する。
 
 - [ ] **Step 5: Windows static buildと通常テストを確認する**
 
@@ -750,17 +754,18 @@ git add crates/speech2md-cli Cargo.lock
 git commit -m "feat: expose speech2md command line interface"
 ```
 
-### Task 10: エンドツーエンド検証とWindows CI
+### Task 10: Linux CIと任意実行の重い検証
 
 **Files:**
 - Modify: `crates/speech2md-cli/tests/cli.rs`
 - Create: `.github/workflows/ci.yml`
+- Create: `.github/workflows/heavy.yml`
 - Modify: `.gitignore`
 - Test: `crates/speech2md-runtime/tests/fixtures/README.md`
 
 **Interfaces:**
 - Consumes: Task 1から9の全公開境界。
-- Produces: モデルなしCI、ローカルモデルありE2E、Windows release build。
+- Produces: UbuntuのモデルなしCI、手動起動するUbuntuの実モデルE2E、ローカルWindows release検証手順。
 
 - [ ] **Step 1: fake enginesを注入したE2Eテストを追加する**
 
@@ -774,12 +779,24 @@ WAV入力から実バイナリ相当のcommand handlerを通し、話者と時�
 
 全テストについて、固定パス、process-globalなcurrent directory変更、共有可能な固定port、前のテストが作るファイル、実行順を前提にしていないことを確認する。環境変数を変更する必要があるテストは子プロセスへ閉じ込める。`serial_test`による順序固定で問題を隠さず、共有資源を依存注入または`TempDir`へ置き換える。
 
-- [ ] **Step 4: Windows CIを作る**
+- [ ] **Step 4: Ubuntuの通常CIを作る**
 
 ```yaml
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -803,11 +820,46 @@ jobs:
       - run: cargo build --release -p speech2md-cli
 ```
 
-- [ ] **Step 5: Releaseバイナリの依存を検査する**
+workflow triggerは`pull_request`と既定ブランチへの`push`に限定する。通常CIにはモデルのダウンロード、ignored test、SRV-DB、長時間性能テストを含めない。jobへ`timeout-minutes: 30`を設定し、ハングによる課金を制限する。
+
+- [ ] **Step 5: Ubuntuの手動実モデルworkflowを作る**
+
+```yaml
+name: Heavy model tests
+on:
+  workflow_dispatch:
+    inputs:
+      run_native_model_tests:
+        description: Download models and run ignored native inference tests
+        required: true
+        default: true
+        type: boolean
+permissions:
+  contents: read
+
+jobs:
+  native-model-tests:
+    if: ${{ inputs.run_native_model_tests }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SPEECH2MD_MODEL_DIR: ${{ runner.temp }}/speech2md-models
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release -p speech2md-cli
+      - run: cargo run --release -p speech2md-cli -- model install
+      - run: cargo test -p speech2md-runtime --test whisper_model -- --ignored
+      - run: cargo test -p speech2md-runtime --test diarization_model -- --ignored
+```
+
+workflow内では`SPEECH2MD_MODEL_DIR=${{ runner.temp }}/speech2md-models`を指定し、モデルをActions cacheやartifactへ保存しない。ignored test用の短い自作音声fixtureだけを使う。SRV-DBと長時間音声は取得しない。
+
+- [ ] **Step 6: Windows releaseバイナリをローカルで検査する**
 
 Windows上で`dumpbin /dependents target\release\speech2md.exe`を実行し、Visual C++ランタイム以外の未同梱DLLがないことを記録する。`speech2md --help`と`speech2md doctor`をクリーンな一時ディレクトリで実行する。
 
-- [ ] **Step 6: 全検証を通す**
+- [ ] **Step 7: 通常CI相当の検証をLinuxで通す**
 
 Run: `cargo fmt --all --check`
 Expected: PASS.
@@ -831,13 +883,21 @@ Run: `cargo llvm-cov --workspace --html --output-dir target/coverage --show-miss
 Expected: generate a workspace report; every uncovered production line has an external-native or OS-specific reason recorded in `docs/testing.md`.
 
 Run: `cargo build --release -p speech2md-cli`
-Expected: PASS and create `target/release/speech2md.exe`.
+Expected: PASS and create the Linux `target/release/speech2md` binary.
 
-- [ ] **Step 7: コミットする**
+- [ ] **Step 8: 手動CIとローカルWindows検証を通す**
+
+Run the `Heavy model tests` workflow manually with `run_native_model_tests=true`.
+Expected: PASS on Ubuntu without saving downloaded models as cache or artifact.
+
+Run locally on Windows: `cargo build --release -p speech2md-cli`.
+Expected: PASS and create `target/release/speech2md.exe`; then complete the `dumpbin`, `--help`, and `doctor` checks from Step 6.
+
+- [ ] **Step 9: コミットする**
 
 ```bash
 git add .github .gitignore crates
-git commit -m "test: verify speech2md end to end on Windows"
+git commit -m "ci: test speech2md on Linux"
 ```
 
 ### Task 11: README、SRV-DB評価、性能記録
@@ -910,6 +970,9 @@ git commit -m "docs: add setup and evaluation guide"
 - [ ] `cargo test --workspace`がモデルとネットワークなしで成功する。
 - [ ] ランダム順かつ単一スレッドのworkspaceテストが異なるseedで3回成功する。
 - [ ] テストが固定パス、固定port、current directory変更、別テストの生成物へ依存しない。
+- [ ] PRとpushの通常GitHub Actionsが`ubuntu-latest`だけでモデル不要テストを実行する。
+- [ ] 実モデルテストは`workflow_dispatch`でだけ起動し、モデルをcacheまたはartifactへ保存しない。
+- [ ] GitHub ActionsのworkflowにWindows runner、SRV-DB、1時間または3時間の入力を含めない。
 - [ ] `speech2md-core`と`speech2md-formats`のline coverageとfunction coverageが100%になる。
 - [ ] workspace全体のカバレッジレポートを生成し、100%未達のproduction lineごとに理由と代替検証を記録する。
 - [ ] 外部依存で妥当な理由がない限り、`speech2md-runtime`と`speech2md-cli`もline coverage 100%になる。
