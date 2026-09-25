@@ -34,27 +34,67 @@ prek run --all-files
 [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz)で、音声デコーダー境界とCommonMarkレンダラーを検査します。
 通常のpre-commitとGitHub Actionsには含めず、時間を区切って手動実行します。
 
-WindowsではVisual Studio Installerから次のコンポーネントを導入してください。
+### Windowsの事前準備
+
+Visual Studio Installerから次のコンポーネントを導入します。
 
 - MSVC v143以降のC++ x64/x86ビルドツール
 - C++ AddressSanitizer
+- Windows 11 SDK
+
+インストール後は、スタートメニューから使用中のVisual Studioに対応する「x64 Native Tools Command Prompt」を起動してください。
+通常のPowerShellやコマンドプロンプトでは、別のVisual Studioに含まれる古いリンカーを参照する場合があります。
+
+次のコマンドで、64ビット版のMSVCリンカーを参照していることを確認できます。
+
+```console
+where link
+```
+
+複数の`link.exe`が表示された場合は、使用するVisual Studioの`Hostx64\x64`以下にあるものが先頭に表示されている必要があります。
 
 nightlyとcargo-fuzzを導入します。
 
-```powershell
+```console
 rustup toolchain install nightly
 cargo +stable install cargo-fuzz --version 0.13.2 --locked
+cargo fuzz --version
 ```
 
-音声デコーダーでは、既存のWAV、MP3、M4A、音声なしMP4を初期corpusとして使用できます。
+### Fuzzテストの実行
 
-```powershell
+リポジトリのルートへ移動し、「x64 Native Tools Command Prompt」から実行します。
+
+音声デコーダーでは、既存のWAV、MP3、M4A、音声なしMP4を初期corpusとして使用できます。
+次のコマンドはそれぞれ60秒間実行します。
+
+```console
 cargo +nightly fuzz run decode_audio fuzz/corpus/decode_audio crates/speech2md-runtime/tests/fixtures -- -max_total_time=60 -max_len=1048576
 cargo +nightly fuzz run render_commonmark -- -max_total_time=60 -max_len=65536
 ```
 
+実行回数を固定して短時間で確認する場合は、`-max_total_time`の代わりに`-runs`を指定します。
+
+```console
+cargo +nightly fuzz run decode_audio fuzz/corpus/decode_audio crates/speech2md-runtime/tests/fixtures -- -runs=200 -max_len=1048576
+cargo +nightly fuzz run render_commonmark -- -runs=1000 -max_len=65536
+```
+
 ビルドだけを確認する場合は次を実行します。
 
-```powershell
+```console
 cargo +nightly fuzz check
 ```
+
+停止時は`Ctrl+C`を入力します。
+クラッシュやサニタイザー違反を検出した入力は、`fuzz/artifacts/<ターゲット名>/`に保存されます。
+生成されたcorpus、artifact、ビルド成果物はGitの管理対象に含めません。
+
+### Windowsでリンクに失敗する場合
+
+`clang_rt.asan`が見つからない場合は、Visual Studio Installerで「C++ AddressSanitizer」が導入済みか確認します。
+
+`dbghelp.lib`が見つからない場合は、Visual Studio Installerで「Windows 11 SDK」が導入済みか確認します。
+
+必要なコンポーネントが導入済みでも失敗する場合は、開いているシェルを閉じてから「x64 Native Tools Command Prompt」を起動し直してください。
+`where link`の先頭が意図したVisual Studioを指していなければ、正しいバージョンの開発者用プロンプトを使用します。
