@@ -3,3 +3,6 @@
 /target/
 /test-data/srv-db/
 *.part
+/fuzz/artifacts/
+/fuzz/corpus/
+/fuzz/target/

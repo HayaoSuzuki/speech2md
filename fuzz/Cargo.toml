@@ -1,0 +1,33 @@
+[package]
+name = "speech2md-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+pulldown-cmark = "0.13"
+speech2md-core = { path = "../crates/speech2md-core" }
+speech2md-formats = { path = "../crates/speech2md-formats" }
+speech2md-runtime = { path = "../crates/speech2md-runtime" }
+tempfile = "3"
+
+[[bin]]
+name = "decode_audio"
+path = "fuzz_targets/decode_audio.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "render_commonmark"
+path = "fuzz_targets/render_commonmark.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

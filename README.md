@@ -28,3 +28,33 @@ cargo test --workspace --all-features --locked
 ```powershell
 prek run --all-files
 ```
+
+## Fuzzing
+
+[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz)で、音声デコーダー境界とCommonMarkレンダラーを検査します。
+通常のpre-commitとGitHub Actionsには含めず、時間を区切って手動実行します。
+
+WindowsではVisual Studio Installerから次のコンポーネントを導入してください。
+
+- MSVC v143以降のC++ x64/x86ビルドツール
+- C++ AddressSanitizer
+
+nightlyとcargo-fuzzを導入します。
+
+```powershell
+rustup toolchain install nightly
+cargo +stable install cargo-fuzz --version 0.13.2 --locked
+```
+
+音声デコーダーでは、既存のWAV、MP3、M4A、音声なしMP4を初期corpusとして使用できます。
+
+```powershell
+cargo +nightly fuzz run decode_audio fuzz/corpus/decode_audio crates/speech2md-runtime/tests/fixtures -- -max_total_time=60 -max_len=1048576
+cargo +nightly fuzz run render_commonmark -- -max_total_time=60 -max_len=65536
+```
+
+ビルドだけを確認する場合は次を実行します。
+
+```powershell
+cargo +nightly fuzz check
+```
