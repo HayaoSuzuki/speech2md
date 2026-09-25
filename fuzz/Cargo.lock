@@ -1055,6 +1055,7 @@ dependencies = [
  "symphonia",
  "tempfile",
  "thiserror",
+ "tracing",
  "url",
 ]
 

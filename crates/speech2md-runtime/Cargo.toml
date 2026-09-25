@@ -9,6 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+tracing.workspace = true
 bytemuck = "1"
 directories = "6"
 memmap2 = "0.9"
@@ -25,4 +26,5 @@ thiserror.workspace = true
 url = { version = "=2.4.1", features = ["serde"] }
 
 [dev-dependencies]
+tracing-subscriber.workspace = true
 proptest = "1"

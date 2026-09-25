@@ -10,3 +10,5 @@ workspace = true
 
 [dependencies]
 speech2md-runtime = { path = "../speech2md-runtime" }
+tracing.workspace = true
+tracing-subscriber.workspace = true

@@ -51,6 +51,12 @@ impl ModelInstaller {
     }
 
     fn install_one(&self, spec: &ModelSpec) -> Result<(), ModelError> {
+        tracing::info!(
+            target: "speech2md_runtime::model",
+            model_id = %spec.id,
+            expected_bytes = spec.size,
+            "model installation started"
+        );
         let final_path = self.store.path(spec.id);
         let partial_path = final_path.with_extension(format!(
             "{}.part",
@@ -67,6 +73,14 @@ impl ModelInstaller {
             });
         if result.is_err() {
             remove_partial(&partial_path)?;
+        }
+        if result.is_ok() {
+            tracing::info!(
+                target: "speech2md_runtime::model",
+                model_id = %spec.id,
+                installed_bytes = spec.size,
+                "model installation completed"
+            );
         }
         result
     }

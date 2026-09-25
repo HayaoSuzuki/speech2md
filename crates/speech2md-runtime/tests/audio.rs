@@ -1,7 +1,43 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use speech2md_runtime::{RuntimeError, decode_to_pcm};
 use tempfile::TempDir;
+
+#[derive(Clone, Default)]
+struct CapturedLogs(Arc<Mutex<Vec<u8>>>);
+
+impl Write for CapturedLogs {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("capture log lock").write(buffer)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl CapturedLogs {
+    fn text(&self) -> String {
+        String::from_utf8(self.0.lock().expect("capture log lock").clone()).expect("logs are UTF-8")
+    }
+}
+
+fn captured_logs() -> &'static CapturedLogs {
+    static LOGS: OnceLock<CapturedLogs> = OnceLock::new();
+    LOGS.get_or_init(|| {
+        let logs = CapturedLogs::default();
+        let writer = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::set_global_default(subscriber).expect("install test subscriber");
+        logs
+    })
+}
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -73,4 +109,18 @@ fn preserves_silence_as_nonempty_pcm() {
             .iter()
             .all(|sample| sample.abs() <= f32::EPSILON)
     );
+}
+
+#[test]
+fn emits_decode_lifecycle_without_exposing_the_input_path() {
+    let logs = captured_logs();
+    let temp_root = TempDir::new().expect("temporary root");
+
+    decode_to_pcm(&fixture("tone.wav"), temp_root.path()).expect("decode fixture");
+
+    let output = logs.text();
+    assert!(output.contains("audio decode started"));
+    assert!(output.contains("audio decode completed"));
+    assert!(!output.contains("tone.wav"));
+    assert!(!output.contains("speech2md-runtime"));
 }

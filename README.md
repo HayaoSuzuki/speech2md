@@ -29,6 +29,28 @@ cargo test --workspace --all-features --locked
 prek run --all-files
 ```
 
+## ログ
+
+CLIは[`tracing`](https://github.com/tokio-rs/tracing)を使用し、ログを標準エラーへ出力します。
+Markdownなどの変換結果を標準出力へ書き出す場合も、ログは変換結果に混ざりません。
+
+既定ではspeech2md自身の`info`以上のログだけを出力し、依存ライブラリのログは出力しません。
+`RUST_LOG`を設定すると、ログレベルを全体またはクレート単位で変更できます。
+機密情報の混入を防ぐため、`RUST_LOG`で指定しても依存ライブラリのログは出力しません。
+
+```powershell
+$env:RUST_LOG = "speech2md=debug"
+cargo run -p speech2md-cli
+
+$env:RUST_LOG = "speech2md_runtime=debug,speech2md_cli=info"
+cargo run -p speech2md-cli
+
+Remove-Item Env:RUST_LOG
+```
+
+無効な`RUST_LOG`を指定した場合、CLIは設定を無視せずエラーで終了します。
+ログには音声、文字起こし本文、モデルのURL、完全なファイルパスを記録しません。
+
 ## Fuzzing
 
 [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz)で、音声デコーダー境界とCommonMarkレンダラーを検査します。

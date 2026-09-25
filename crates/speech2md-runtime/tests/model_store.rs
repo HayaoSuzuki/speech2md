@@ -1,6 +1,7 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
 use sha2::{Digest, Sha256};
@@ -8,6 +9,40 @@ use speech2md_runtime::{
     ModelError, ModelId, ModelInstaller, ModelManifest, ModelSpec, ModelStore,
 };
 use tempfile::TempDir;
+
+#[derive(Clone, Default)]
+struct CapturedLogs(Arc<Mutex<Vec<u8>>>);
+
+impl Write for CapturedLogs {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("capture log lock").write(buffer)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl CapturedLogs {
+    fn text(&self) -> String {
+        String::from_utf8(self.0.lock().expect("capture log lock").clone()).expect("logs are UTF-8")
+    }
+}
+
+fn captured_logs() -> &'static CapturedLogs {
+    static LOGS: OnceLock<CapturedLogs> = OnceLock::new();
+    LOGS.get_or_init(|| {
+        let logs = CapturedLogs::default();
+        let writer = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::set_global_default(subscriber).expect("install test subscriber");
+        logs
+    })
+}
 
 fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
@@ -56,6 +91,7 @@ fn installs_only_after_sha256_matches() {
     let bytes = b"model bytes";
     let (url, server) = model_server(bytes, bytes.len());
     let (installer, store, _root) = installer_for(&url, bytes, sha256(bytes));
+    let logs = captured_logs();
 
     installer
         .install(&[ModelId::WhisperBase])
@@ -66,6 +102,12 @@ fn installs_only_after_sha256_matches() {
         .require(ModelId::WhisperBase)
         .expect("installed model is available");
     assert_eq!(std::fs::read(path).expect("read installed model"), bytes);
+    let output = logs.text();
+    assert!(output.contains("model installation started"));
+    assert!(output.contains("model installation completed"));
+    assert!(output.contains("model_id=whisper-base"));
+    assert!(!output.contains(&url));
+    assert!(!output.contains(store.root().to_string_lossy().as_ref()));
 }
 
 #[test]
