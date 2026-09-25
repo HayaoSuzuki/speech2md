@@ -13,6 +13,7 @@
 ## Global Constraints
 
 - 対象環境はWindows x86-64、CPU実行とする。
+- 配布対象はWindows x86-64だが、モデル不要テストと手動実モデルテストを実行するためLinuxでもコンパイルおよび実行できる実装にする。
 - 入力はWAV、MP3、一般的なiPhoneボイスメモのAAC-LC/M4Aを扱う。
 - 文字起こし言語は日本語とし、英語翻訳を行わない。
 - `transcribe`はネットワークへ接続せず、通信は明示的な`model install`だけが行う。
@@ -497,7 +498,7 @@ pub struct ModelSpec {
 }
 ```
 
-Windowsでは`%LOCALAPPDATA%\speech2md\models`を既定とし、テストでは明示した一時ルートを使う。マニフェストは`include_str!`でバイナリへ埋め込む。
+Windowsでは`%LOCALAPPDATA%\speech2md\models`を既定とし、LinuxではXDG data directoryを使う。保存先解決を`ModelRootResolver`へ分離し、テストでは明示した一時ルートを使う。マニフェストは`include_str!`でバイナリへ埋め込む。
 `SPEECH2MD_MODEL_DIR`が設定されている場合はその絶対パスを優先し、CIと隔離テストでユーザー領域を変更せずに済むようにする。
 
 - [ ] **Step 4: ストリーミング取得、検証、原子的確定を実装する**
@@ -612,13 +613,13 @@ Expected: FAIL with unresolved diarization APIs.
 
 `SPEECH2MD_MODEL_DIR`に導入済み話者モデルがある場合だけ実行し、リポジトリの短い自作複数話者fixtureを使って、2話者指定で2種類のIDと妥当な時刻区間が返ることを検証する。
 
-- [ ] **Step 5: Windows static buildと通常テストを確認する**
+- [ ] **Step 5: Linux CI buildとローカルWindows static buildを確認する**
 
 Run: `cargo test -p speech2md-runtime`
 Expected: PASS.
 
 Run: `cargo check -p speech2md-runtime --target x86_64-pc-windows-msvc`
-Expected: PASS without undeclared runtime DLL requirements.
+Expected: PASS when run in the local Windows development environment, without undeclared runtime DLL requirements. Ubuntu CIではhost targetに対して`cargo check -p speech2md-runtime`を実行する。
 
 - [ ] **Step 6: コミットする**
 
@@ -712,6 +713,7 @@ fn transcribe_requires_an_input() {
 ```
 
 別テストで、`--speakers 0`がexit 2になること、モデル不足がexit 4と正確な`model install`を表示すること、既存出力を`--force`なしで保持すること、command dispatchが`model install`分岐だけで`ModelInstaller`を生成することを検証する。
+fake engineが本文`CONFIDENTIAL_SENTINEL`を含むエラーを返すテストも追加し、標準エラー出力と通常ログのどちらにもsentinelが現れないことを検証する。
 
 - [ ] **Step 2: CLIテストの失敗を確認する**
 
@@ -773,7 +775,7 @@ WAV入力から実バイナリ相当のcommand handlerを通し、話者と時�
 
 - [ ] **Step 2: 実モデルE2Eをignoredで追加する**
 
-四つのモデル環境変数と複数話者音声がある場合に、実CLIで`transcribe --speakers 2`を実行する。出力本文の完全一致は求めず、2種類以下の話者ラベル、時刻順、非空本文、CommonMark解析成功を検証する。
+`SPEECH2MD_MODEL_DIR`に導入済みモデルがある場合に、リポジトリの短い自作複数話者fixtureを実CLIで`transcribe --speakers 2`へ渡す。出力本文の完全一致は求めず、2種類の話者ラベル、時刻順、非空本文、CommonMark解析成功を検証する。
 
 - [ ] **Step 3: テストの状態分離を監査する**
 
@@ -816,7 +818,6 @@ jobs:
           }
       - run: cargo llvm-cov -p speech2md-core --fail-under-lines 100 --fail-under-functions 100
       - run: cargo llvm-cov -p speech2md-formats --fail-under-lines 100 --fail-under-functions 100
-      - run: cargo llvm-cov --workspace --html --output-dir target/coverage
       - run: cargo build --release -p speech2md-cli
 ```
 
@@ -832,7 +833,12 @@ on:
       run_native_model_tests:
         description: Download models and run ignored native inference tests
         required: true
-        default: true
+        default: false
+        type: boolean
+      run_workspace_coverage:
+        description: Instrument the full workspace and report uncovered lines
+        required: true
+        default: false
         type: boolean
 permissions:
   contents: read
@@ -851,9 +857,21 @@ jobs:
       - run: cargo run --release -p speech2md-cli -- model install
       - run: cargo test -p speech2md-runtime --test whisper_model -- --ignored
       - run: cargo test -p speech2md-runtime --test diarization_model -- --ignored
+
+  workspace-coverage:
+    if: ${{ inputs.run_workspace_coverage }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: cargo llvm-cov --workspace --summary-only --show-missing-lines
 ```
 
-workflow内では`SPEECH2MD_MODEL_DIR=${{ runner.temp }}/speech2md-models`を指定し、モデルをActions cacheやartifactへ保存しない。ignored test用の短い自作音声fixtureだけを使う。SRV-DBと長時間音声は取得しない。
+二つの手動入力は既定で`false`とし、選択したjobだけを実行する。実モデルjobでは`SPEECH2MD_MODEL_DIR=${{ runner.temp }}/speech2md-models`を指定し、モデルをActions cacheやartifactへ保存しない。ignored test用の短い自作音声fixtureだけを使う。SRV-DBと長時間音声は取得しない。
 
 - [ ] **Step 6: Windows releaseバイナリをローカルで検査する**
 
@@ -879,9 +897,6 @@ Expected: PASS at 100%.
 Run: `cargo llvm-cov -p speech2md-formats --fail-under-lines 100 --fail-under-functions 100 --show-missing-lines`
 Expected: PASS at 100%.
 
-Run: `cargo llvm-cov --workspace --html --output-dir target/coverage --show-missing-lines`
-Expected: generate a workspace report; every uncovered production line has an external-native or OS-specific reason recorded in `docs/testing.md`.
-
 Run: `cargo build --release -p speech2md-cli`
 Expected: PASS and create the Linux `target/release/speech2md` binary.
 
@@ -889,6 +904,12 @@ Expected: PASS and create the Linux `target/release/speech2md` binary.
 
 Run the `Heavy model tests` workflow manually with `run_native_model_tests=true`.
 Expected: PASS on Ubuntu without saving downloaded models as cache or artifact.
+
+Run the same workflow with `run_workspace_coverage=true` and `run_native_model_tests=false`.
+Expected: PASS and print the full workspace coverage summary and missing lines without downloading models.
+
+Run locally when an HTML report is needed: `cargo llvm-cov --workspace --html --output-dir target/coverage`.
+Expected: generate `target/coverage/html/index.html`; every uncovered production line has an external-native or OS-specific reason recorded in `docs/testing.md`.
 
 Run locally on Windows: `cargo build --release -p speech2md-cli`.
 Expected: PASS and create `target/release/speech2md.exe`; then complete the `dumpbin`, `--help`, and `doctor` checks from Step 6.
@@ -950,7 +971,7 @@ Expected: PASS only after all documented arguments exist.
 Run: `cargo test --workspace`
 Expected: PASS.
 
-Run: `cargo test -p speech2md-runtime --test srv_db -- --ignored` with `SRV_DB_DIR` and model variables set locally.
+Run: `cargo test -p speech2md-runtime --test srv_db -- --ignored` with `SRV_DB_DIR` and `SPEECH2MD_MODEL_DIR` set locally.
 Expected: PASS and print a metrics JSON object without copying dataset files.
 
 Run: `rg -n "SRV-DB|model install|transcribe|オフライン|CommonMark" README.md docs/testing.md`
@@ -971,7 +992,8 @@ git commit -m "docs: add setup and evaluation guide"
 - [ ] ランダム順かつ単一スレッドのworkspaceテストが異なるseedで3回成功する。
 - [ ] テストが固定パス、固定port、current directory変更、別テストの生成物へ依存しない。
 - [ ] PRとpushの通常GitHub Actionsが`ubuntu-latest`だけでモデル不要テストを実行する。
-- [ ] 実モデルテストは`workflow_dispatch`でだけ起動し、モデルをcacheまたはartifactへ保存しない。
+- [ ] 実モデルテストとworkspace全体のカバレッジは、既定値`false`の独立した`workflow_dispatch`入力でだけ起動する。
+- [ ] 実モデルをcacheまたはartifactへ保存しない。
 - [ ] GitHub ActionsのworkflowにWindows runner、SRV-DB、1時間または3時間の入力を含めない。
 - [ ] `speech2md-core`と`speech2md-formats`のline coverageとfunction coverageが100%になる。
 - [ ] workspace全体のカバレッジレポートを生成し、100%未達のproduction lineごとに理由と代替検証を記録する。
