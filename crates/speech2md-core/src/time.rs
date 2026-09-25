@@ -22,6 +22,11 @@ pub struct TimeSpan {
 }
 
 impl TimeSpan {
+    /// Creates an ordered half-open time span.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidTimeSpan`] when `start` is after `end`.
     pub fn new(start: Timestamp, end: Timestamp) -> Result<Self, InvalidTimeSpan> {
         (start <= end)
             .then_some(Self { start, end })
@@ -52,6 +57,12 @@ pub struct InvalidTimeSpan;
 pub struct Confidence(f32);
 
 impl Confidence {
+    /// Creates a probability-like confidence value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidConfidence`] unless `value` is finite and in the
+    /// inclusive range from zero to one.
     pub fn new(value: f32) -> Result<Self, InvalidConfidence> {
         (value.is_finite() && (0.0..=1.0).contains(&value))
             .then_some(Self(value))
@@ -94,8 +105,14 @@ mod tests {
 
     #[test]
     fn confidence_is_a_probability() {
-        assert_eq!(Confidence::new(0.0).expect("lower bound").value(), 0.0);
-        assert_eq!(Confidence::new(1.0).expect("upper bound").value(), 1.0);
+        assert_eq!(
+            Confidence::new(0.0).expect("lower bound").value().to_bits(),
+            0.0_f32.to_bits()
+        );
+        assert_eq!(
+            Confidence::new(1.0).expect("upper bound").value().to_bits(),
+            1.0_f32.to_bits()
+        );
         assert!(Confidence::new(-0.1).is_err());
         assert!(Confidence::new(1.1).is_err());
         assert!(Confidence::new(f32::NAN).is_err());

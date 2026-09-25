@@ -15,3 +15,37 @@ license = "MIT"
 [workspace.dependencies]
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -1 }
+
+# Internal workspace crates are not published independently, so registry
+# metadata is intentionally maintained in the user-facing README instead.
+cargo_common_metadata = "allow"
+# Multiple versions can enter through native and test dependencies and are
+# audited through Cargo.lock rather than rejected categorically.
+multiple_crate_versions = "allow"
+
+# Selected restriction lints that enforce project-wide safety properties.
+allow_attributes_without_reason = "deny"
+dbg_macro = "deny"
+exit = "deny"
+filetype_is_file = "deny"
+lossy_float_literal = "deny"
+mem_forget = "deny"
+panic_in_result_fn = "deny"
+print_stderr = "deny"
+print_stdout = "deny"
+rc_buffer = "deny"
+rest_pat_in_fully_bound_structs = "deny"
+string_to_string = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"
+verbose_file_reads = "deny"

@@ -11,7 +11,7 @@ fn utterance(start: u64, end: u64, speaker: u32, text: &str) -> Utterance {
     }
 }
 
-fn config() -> NormalizationConfig {
+const fn config() -> NormalizationConfig {
     NormalizationConfig {
         max_gap_ms: 200,
         max_chars: 100,

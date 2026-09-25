@@ -9,10 +9,21 @@ pub struct OverlapRatio {
 }
 
 impl OverlapRatio {
+    /// Creates a ratio expressed in basis points.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidOverlapRatio`] when `value` is greater than 10,000.
     pub fn from_basis_points(value: u16) -> Result<Self, InvalidOverlapRatio> {
         Self::from_fraction(u32::from(value), 10_000_u32)
     }
 
+    /// Creates an exact ratio from a numerator and denominator.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidOverlapRatio`] when the denominator is zero or the
+    /// numerator is greater than the denominator.
     pub fn from_fraction(numerator: u32, denominator: u32) -> Result<Self, InvalidOverlapRatio> {
         (denominator > 0 && numerator <= denominator)
             .then_some(Self {
@@ -35,7 +46,7 @@ impl OverlapRatio {
 #[error("overlap ratio must be between zero and one and have a nonzero denominator")]
 pub struct InvalidOverlapRatio;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AssignmentConfig {
     pub min_overlap_ratio: OverlapRatio,
 }
