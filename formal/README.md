@@ -52,5 +52,13 @@ lake exe testgen
 lake exe testgen | Set-Content -Encoding utf8 test-vectors.json
 ```
 
-Rust実装後は、このJSONを統合テストで読み込み、LeanモデルとRust実装の結果を比較します。
+Rust側の契約fixtureを更新する場合は、リポジトリルートから次を実行します。
+
+```powershell
+Push-Location formal
+lake exe testgen | Set-Content -Encoding utf8 ..\crates\speech2md-core\tests\fixtures\lean-speaker-assignment.json
+Pop-Location
+```
+
+Rustの統合テストは、このJSONを読み込んでLeanモデルとRust実装の結果を比較します。
 Leanの証明はLeanモデルの性質を保証しますが、Rust実装、ネイティブライブラリ、OSの挙動まで保証するものではありません。
