@@ -7,3 +7,6 @@ license.workspace = true
 
 [dependencies]
 speech2md-core = { path = "../speech2md-core" }
+
+[dev-dependencies]
+pulldown-cmark = "0.13"
