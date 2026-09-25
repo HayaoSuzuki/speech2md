@@ -22,6 +22,9 @@
 - 既存出力を`--force`なしで上書きしない。
 - Rustの最小バージョンは1.85、`Cargo.lock`をコミットする。
 - 通常の`cargo test --workspace`はモデルとネットワークを要求しない。
+- `speech2md-core`と`speech2md-formats`はline coverageとfunction coverageを100%にする。
+- `speech2md-cli`とネイティブI/O以外の`speech2md-runtime`も100%を目標とし、未到達行は外部依存またはOS依存である理由と代替検証を`docs/testing.md`へ記録する。
+- カバレッジ対象から除外するためだけの`cfg(coverage)`、到達不能化、ファイル除外は行わない。
 
 ## Review Focus
 
@@ -123,9 +126,11 @@ serde = { version = "1", features = ["derive"] }
 # rust-toolchain.toml
 [toolchain]
 channel = "1.85.0"
-components = ["clippy", "rustfmt"]
+components = ["clippy", "rustfmt", "llvm-tools-preview"]
 profile = "minimal"
 ```
+
+開発環境とCIで`cargo-llvm-cov 0.9`を使う。
 
 三つの後続クレートには最小の`Cargo.toml`と空の`lib.rs`または`fn main() {}`を置き、最初の`cargo test --workspace`からworkspace全体を解決可能にする。`.gitignore`には`/target/`、`/test-data/srv-db/`、`*.part`を記載する。
 
@@ -180,6 +185,9 @@ impl Confidence {
 
 Run: `cargo test --workspace`
 Expected: PASS.
+
+Run: `cargo llvm-cov -p speech2md-core --fail-under-lines 100 --fail-under-functions 100 --show-missing-lines`
+Expected: PASS with 100% line and function coverage.
 
 - [ ] **Step 5: フォーマットとlintを確認する**
 
@@ -290,6 +298,9 @@ pub fn normalize_utterances(
 Run: `cargo test -p speech2md-core`
 Expected: PASS.
 
+Run: `cargo llvm-cov -p speech2md-core --fail-under-lines 100 --fail-under-functions 100 --show-missing-lines`
+Expected: PASS with no uncovered production lines or functions.
+
 - [ ] **Step 7: コミットする**
 
 ```bash
@@ -354,6 +365,9 @@ pub fn render_commonmark(document: &TranscriptDocument) -> String {
 
 Run: `cargo test -p speech2md-formats`
 Expected: PASS.
+
+Run: `cargo llvm-cov -p speech2md-formats --fail-under-lines 100 --fail-under-functions 100 --show-missing-lines`
+Expected: PASS with 100% line and function coverage.
 
 - [ ] **Step 5: コミットする**
 
@@ -763,10 +777,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
+      - uses: taiki-e/install-action@cargo-llvm-cov
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - run: cargo llvm-cov -p speech2md-core --fail-under-lines 100 --fail-under-functions 100
+      - run: cargo llvm-cov -p speech2md-formats --fail-under-lines 100 --fail-under-functions 100
+      - run: cargo llvm-cov --workspace --html --output-dir target/coverage
       - run: cargo build --release -p speech2md-cli
 ```
 
@@ -784,6 +802,15 @@ Expected: PASS.
 
 Run: `cargo test --workspace`
 Expected: PASS with model tests ignored.
+
+Run: `cargo llvm-cov -p speech2md-core --fail-under-lines 100 --fail-under-functions 100 --show-missing-lines`
+Expected: PASS at 100%.
+
+Run: `cargo llvm-cov -p speech2md-formats --fail-under-lines 100 --fail-under-functions 100 --show-missing-lines`
+Expected: PASS at 100%.
+
+Run: `cargo llvm-cov --workspace --html --output-dir target/coverage --show-missing-lines`
+Expected: generate a workspace report; every uncovered production line has an external-native or OS-specific reason recorded in `docs/testing.md`.
 
 Run: `cargo build --release -p speech2md-cli`
 Expected: PASS and create `target/release/speech2md.exe`.
@@ -863,6 +890,9 @@ git commit -m "docs: add setup and evaluation guide"
 - [ ] `cargo fmt --all --check`が成功する。
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`が成功する。
 - [ ] `cargo test --workspace`がモデルとネットワークなしで成功する。
+- [ ] `speech2md-core`と`speech2md-formats`のline coverageとfunction coverageが100%になる。
+- [ ] workspace全体のカバレッジレポートを生成し、100%未達のproduction lineごとに理由と代替検証を記録する。
+- [ ] 外部依存で妥当な理由がない限り、`speech2md-runtime`と`speech2md-cli`もline coverage 100%になる。
 - [ ] 実モデルを指定したignoredテストがWindows x86-64で成功する。
 - [ ] `cargo build --release -p speech2md-cli`が成功する。
 - [ ] `speech2md model install`以外のコマンドがHTTP clientを構築しない。
