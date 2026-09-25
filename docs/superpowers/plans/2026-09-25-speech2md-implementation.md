@@ -166,12 +166,14 @@ Expected: FAIL with unresolved `TimeSpan` and `Confidence`.
 pub struct Timestamp(u64);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TimeSpan { pub start: Timestamp, pub end: Timestamp }
+pub struct TimeSpan { start: Timestamp, end: Timestamp }
 
 impl TimeSpan {
     pub fn new(start: Timestamp, end: Timestamp) -> Result<Self, InvalidTimeSpan> {
         (start <= end).then_some(Self { start, end }).ok_or(InvalidTimeSpan)
     }
+    pub fn start(self) -> Timestamp { self.start }
+    pub fn end(self) -> Timestamp { self.end }
     pub fn duration_ms(self) -> u64 { self.end.as_millis() - self.start.as_millis() }
 }
 
@@ -264,8 +266,8 @@ impl OverlapRatio {
 pub struct AssignmentConfig { pub min_overlap_ratio: OverlapRatio }
 
 pub fn overlap_ms(left: TimeSpan, right: TimeSpan) -> u64 {
-    left.end.as_millis().min(right.end.as_millis())
-        .saturating_sub(left.start.as_millis().max(right.start.as_millis()))
+    left.end().as_millis().min(right.end().as_millis())
+        .saturating_sub(left.start().as_millis().max(right.start().as_millis()))
 }
 
 pub fn assign_speakers(
@@ -554,8 +556,8 @@ git commit -m "feat: install and verify inference models"
 #[test]
 fn converts_whisper_centiseconds_to_milliseconds() {
     let span = native_span_to_domain(123, 456).unwrap();
-    assert_eq!(span.start.as_millis(), 1_230);
-    assert_eq!(span.end.as_millis(), 4_560);
+    assert_eq!(span.start().as_millis(), 1_230);
+    assert_eq!(span.end().as_millis(), 4_560);
 }
 ```
 

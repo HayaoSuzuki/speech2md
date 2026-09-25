@@ -1,2 +1,5 @@
 /formal/.lake/
 /.lean-elan-init.ps1
+/target/
+/test-data/srv-db/
+*.part

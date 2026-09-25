@@ -1,0 +1,9 @@
+[package]
+name = "speech2md-cli"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+speech2md-runtime = { path = "../speech2md-runtime" }
