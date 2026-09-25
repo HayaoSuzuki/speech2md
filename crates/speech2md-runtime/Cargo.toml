@@ -10,13 +10,19 @@ workspace = true
 
 [dependencies]
 bytemuck = "1"
+directories = "6"
 memmap2 = "0.9"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 rubato = "0.16"
+serde.workspace = true
+serde_json = "1"
+sha2 = "0.10"
 speech2md-core = { path = "../speech2md-core" }
 speech2md-formats = { path = "../speech2md-formats" }
 symphonia = { version = "0.5", default-features = false, features = ["aac", "isomp4", "mp3", "pcm", "wav"] }
 tempfile = "3"
 thiserror.workspace = true
+url = { version = "=2.4.1", features = ["serde"] }
 
 [dev-dependencies]
 proptest = "1"
