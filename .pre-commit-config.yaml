@@ -14,3 +14,10 @@ repos:
         entry: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
         pass_filenames: false
         files: '(^|/)(.*\.rs|Cargo\.toml|Cargo\.lock|clippy\.toml|rust-toolchain\.toml)$'
+
+      - id: cargo-test
+        name: cargo test
+        language: system
+        entry: cargo test --workspace --all-features --locked
+        pass_filenames: false
+        files: '(^|/)(.*\.rs|Cargo\.toml|Cargo\.lock|rust-toolchain\.toml)$'

@@ -20,6 +20,7 @@ prek install
 ```powershell
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-features --locked
 ```
 
 コミットせずに全ファイルを手動検査する場合は、次を実行します。
