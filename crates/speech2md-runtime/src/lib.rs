@@ -1,6 +1,7 @@
 //! I/O adapters and application orchestration.
 
 mod audio;
+pub mod engine_artifact;
 mod error;
 mod model;
 
