@@ -26,6 +26,7 @@ fn usage_errors_exit_with_code_two() {
 }
 
 #[test]
+#[cfg(target_os = "windows")]
 fn install_reports_a_network_failure_without_leaving_the_test_root() {
     let root = tempfile::tempdir().expect("temporary engine root");
     speech2md()
@@ -39,7 +40,7 @@ fn install_reports_a_network_failure_without_leaving_the_test_root() {
 }
 
 #[test]
-fn list_is_local_and_verify_reports_an_actionable_missing_engine() {
+fn list_is_local() {
     let root = tempfile::tempdir().expect("temporary engine root");
     speech2md()
         .args(["engine", "list"])
@@ -50,6 +51,12 @@ fn list_is_local_and_verify_reports_an_actionable_missing_engine() {
         .stdout(predicate::str::contains(
             "windows-x86_64 whispercpp-v1.9.4-speech2md.1: not installed",
         ));
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn verify_reports_an_actionable_missing_engine() {
+    let root = tempfile::tempdir().expect("temporary engine root");
 
     speech2md()
         .args(["engine", "verify"])
@@ -62,6 +69,7 @@ fn list_is_local_and_verify_reports_an_actionable_missing_engine() {
 }
 
 #[test]
+#[cfg(target_os = "windows")]
 fn prune_is_idempotent_when_no_obsolete_engine_exists() {
     let root = tempfile::tempdir().expect("temporary engine root");
 
@@ -74,4 +82,22 @@ fn prune_is_idempotent_when_no_obsolete_engine_exists() {
         .stdout(predicate::str::contains(
             "Pruned 0 engine installation(s); kept 0 locked installation(s).",
         ));
+}
+
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn unpublished_platform_rejects_engine_operations_without_network_access() {
+    let root = tempfile::tempdir().expect("temporary engine root");
+
+    for command in ["install", "verify", "prune"] {
+        speech2md()
+            .args(["engine", command])
+            .env("SPEECH2MD_ENGINE_DIR", root.path())
+            .env("HTTPS_PROXY", "http://127.0.0.1:9")
+            .assert()
+            .code(4)
+            .stderr(predicate::str::contains(
+                "no engine artifact is published for",
+            ));
+    }
 }
