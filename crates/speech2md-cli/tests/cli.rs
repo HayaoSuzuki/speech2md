@@ -92,3 +92,36 @@ fn existing_output_fails_before_models_or_inference_and_preserves_bytes() {
         b"existing bytes"
     );
 }
+
+#[test]
+fn readme_command_examples_are_accepted_by_the_argument_parser() {
+    let examples = [
+        ["model", "install"].as_slice(),
+        ["engine", "install"].as_slice(),
+        ["transcribe", "meeting.m4a"].as_slice(),
+        [
+            "transcribe",
+            "meeting.wav",
+            "--speakers",
+            "3",
+            "--prompt",
+            "Rust, Kubernetes, PostgreSQL",
+        ]
+        .as_slice(),
+        [
+            "transcribe",
+            "meeting.mp3",
+            "--whisper",
+            "small",
+            "--output",
+            "minutes.md",
+        ]
+        .as_slice(),
+        ["model", "list"].as_slice(),
+        ["doctor"].as_slice(),
+    ];
+
+    for arguments in examples {
+        speech2md().args(arguments).arg("--help").assert().success();
+    }
+}

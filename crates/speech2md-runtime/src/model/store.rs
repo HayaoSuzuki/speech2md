@@ -54,10 +54,13 @@ impl ModelRootResolver {
     /// cannot be determined.
     pub fn resolve() -> Result<PathBuf, ModelError> {
         let override_path = env::var_os(MODEL_DIRECTORY_ENV).map(PathBuf::from);
-        let platform_path = ProjectDirs::from("", "", "speech2md")
-            .map(|directories| directories.data_dir().join("models"));
-        resolve_paths(override_path, platform_path)
+        resolve_paths(override_path, default_model_root())
     }
+}
+
+fn default_model_root() -> Option<PathBuf> {
+    ProjectDirs::from("", "", "speech2md")
+        .map(|directories| directories.data_local_dir().join("models"))
 }
 
 fn resolve_paths(
@@ -78,7 +81,9 @@ fn resolve_paths(
 mod tests {
     use std::path::PathBuf;
 
-    use super::{ModelError, ModelRootResolver, resolve_paths};
+    use directories::ProjectDirs;
+
+    use super::{ModelError, ModelRootResolver, default_model_root, resolve_paths};
 
     #[test]
     fn absolute_override_has_priority() {
@@ -112,5 +117,18 @@ mod tests {
 
         assert!(path.is_absolute());
         assert!(path.ends_with("models"));
+    }
+
+    #[test]
+    fn platform_resolution_uses_the_local_data_directory() {
+        let expected = ProjectDirs::from("", "", "speech2md")
+            .expect("platform data directory")
+            .data_local_dir()
+            .join("models");
+
+        assert_eq!(
+            default_model_root().expect("resolve default model root"),
+            expected
+        );
     }
 }

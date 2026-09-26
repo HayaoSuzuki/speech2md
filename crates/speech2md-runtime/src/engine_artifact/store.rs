@@ -255,10 +255,13 @@ impl EngineRootResolver {
     /// Returns an error for a relative override or unavailable platform directory.
     pub fn resolve() -> Result<PathBuf, EngineArtifactError> {
         let override_path = env::var_os(ENGINE_DIRECTORY_ENV).map(PathBuf::from);
-        let platform_path = ProjectDirs::from("", "", "speech2md")
-            .map(|directories| directories.data_dir().join("engines"));
-        resolve_paths(override_path, platform_path)
+        resolve_paths(override_path, default_engine_root())
     }
+}
+
+fn default_engine_root() -> Option<PathBuf> {
+    ProjectDirs::from("", "", "speech2md")
+        .map(|directories| directories.data_local_dir().join("engines"))
 }
 
 fn resolve_paths(
@@ -312,7 +315,9 @@ impl Platform {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{EngineArtifactError, resolve_paths};
+    use directories::ProjectDirs;
+
+    use super::{EngineArtifactError, default_engine_root, resolve_paths};
 
     #[test]
     fn absolute_override_has_priority() {
@@ -338,5 +343,18 @@ mod tests {
             resolve_paths(None, None),
             Err(EngineArtifactError::InvalidRoot(_))
         ));
+    }
+
+    #[test]
+    fn platform_resolution_uses_the_local_data_directory() {
+        let expected = ProjectDirs::from("", "", "speech2md")
+            .expect("platform data directory")
+            .data_local_dir()
+            .join("engines");
+
+        assert_eq!(
+            default_engine_root().expect("resolve default engine root"),
+            expected
+        );
     }
 }

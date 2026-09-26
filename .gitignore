@@ -3,6 +3,8 @@
 /target/
 /dist/
 /test-data/srv-db/
+/test-data/srv-db-results/
+/test-data/performance/
 /samples/*.wav
 *.part
 /fuzz/artifacts/

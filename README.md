@@ -1,180 +1,233 @@
 # speech2md
-音声の文字起こしツール
 
-設計資料は[`docs/superpowers/specs/2026-09-25-speech2md-design.md`](docs/superpowers/specs/2026-09-25-speech2md-design.md)、実装計画は[`docs/superpowers/plans/2026-09-25-speech2md-implementation.md`](docs/superpowers/plans/2026-09-25-speech2md-implementation.md)にあります。
+speech2mdは、日本語の会議音声をローカルで文字起こしし、話者と時刻を含むCommonMark文書を生成するCLIです。
+文字起こしにはCPU版whisper.cpp、話者分離にはsherpa-onnxを使用します。
 
-話者割り当ての純粋なドメインモデルはLeanでも検証しています。Windowsでの実行方法、証明済みの性質、Rustテスト用JSONの生成方法は[`formal/README.md`](formal/README.md)を参照してください。
+## 対象環境
 
-## 文字起こしエンジン
+主な対象は64ビット版Windowsです。
+GPUは使用せず、CPUだけで処理します。
+RustコードはWindows、macOS、Linuxに対応する設計ですが、現時点でダウンロード可能なwhisper.cppエンジン成果物はWindows x86-64版だけです。
+macOSとLinuxの成果物は[`engines/README.md`](engines/README.md)の手順でビルドしてから公開する必要があります。
 
-文字起こしには、speech2md用にビルドしたCPU版`whisper-cli`を使用します。
-通常の文字起こし処理中にエンジンをダウンロードすることはありません。
-初回セットアップ時に、利用者が明示的に次のコマンドを実行します。
+## 対応する入力と出力
+
+入力はWAV、MP3、AAC-LCを格納したM4Aです。
+iPhoneのボイスメモで作成した一般的なM4Aを想定しています。
+FFmpegは必要ありません。
+動画ファイルはまだ受け付けません。
+
+出力はUTF-8のCommonMarkです。
+プレーンテキスト、HTML、独自形式はまだ選択できません。
+
+## インストール
+
+[Rust 1.85以降](https://www.rust-lang.org/tools/install)を導入し、リポジトリのルートでreleaseバイナリをビルドします。
+
+```console
+cargo build --release -p speech2md-cli --locked
+```
+
+Windowsでは`target\release\speech2md.exe`が生成されます。
+任意のディレクトリへコピーし、そのディレクトリを`PATH`へ追加してください。
+
+## 初回セットアップ
+
+推論エンジンとモデルは、文字起こしを始める前に明示的に導入します。
 
 ```console
 speech2md engine install
+speech2md model install
+speech2md doctor
+```
+
+`engine install`はGitHub Releases、`model install`はモデルの配布元へ接続します。
+ダウンロードしたファイルはサイズとSHA-256を検査してから配置します。
+`transcribe`がエンジンやモデルを暗黙にダウンロードすることはありません。
+
+導入状態は次のコマンドで確認できます。
+
+```console
 speech2md engine list
 speech2md engine verify
-speech2md engine prune
+speech2md model list
 ```
 
-`install`だけがGitHub Releasesへ接続します。
-ダウンロードしたアーカイブはSHA-256とサイズを検査してから展開し、`verify`は保存済み実行ファイルを再検査します。
-現在のマニフェストに成果物がないOSでは、架空のURLへ接続せず、未提供であることを示すエラーになります。
+## 基本操作
 
-既定の保存先はOSごとのユーザーデータディレクトリ以下です。
+出力先を省略すると、入力ファイルと同じ場所に同名の`.md`ファイルを書き込みます。
 
-- Windows: `%LOCALAPPDATA%\speech2md\engines`
-- macOS: `~/Library/Application Support/speech2md/engines`
-- Linux: `$XDG_DATA_HOME/speech2md/engines`（未設定時は`~/.local/share/speech2md/engines`）
+```console
+speech2md transcribe meeting.m4a
+speech2md transcribe meeting.wav --speakers 3 --prompt "Rust, Kubernetes, PostgreSQL"
+speech2md transcribe meeting.mp3 --whisper small --output minutes.md
+```
 
-アーカイブ、展開用一時領域、導入済みエンジンが一時的に併存します。
-セットアップ前にはアーカイブサイズの数倍の空き容量を確保し、古い版は`engine prune`で削除してください。
+既存ファイルは上書きしません。
+置き換える場合だけ`--force`を付けます。
 
-長い日本語プロンプトはコマンドラインへ本文を渡さず、UTF-8ファイルを`--prompt-file`で渡します。
-このオプションはspeech2mdのビルドに含まれるwhisper.cppパッチで追加しており、プロンプト本文をヘルプやエラー出力へ表示しません。
+```console
+speech2md transcribe meeting.wav --output minutes.md --force
+```
 
-エンジンを自分でビルドする手順、固定した上流コミット、成果物の検証・公開手順は[`engines/README.md`](engines/README.md)にあります。
-WindowsではVisual StudioのC++ x64ビルドツールとCMake、macOSではXcode Command Line ToolsとCMake、LinuxではC++コンパイラとCMakeが必要です。
-ローカル検証では任意で手元のモデルと短いWAVを渡せますが、モデルや音声は成果物にもリポジトリにも含めません。
+## 話者数
 
-## ローカル音声による話者分離テスト
+話者分離は常に実行します。
+話者数を省略すると自動推定し、人数が分かっている場合は`--speakers`で正の整数を指定します。
 
-実モデルを使う話者分離テストは重いため、通常のテストとGitHub Actionsでは実行しません。
-話者分離モデルを置いたディレクトリと、4話者を収録したローカルWAVを環境変数で指定して手動実行します。
+```console
+speech2md transcribe meeting.wav --speakers 4
+```
+
+`Speaker 1`などの番号は一つの録音内だけで有効です。
+別の録音に現れる同じ番号が同一人物を示すわけではありません。
+
+## 文字起こしモデルとプロンプト
+
+既定の文字起こしモデルは`base`です。
+`small`は保存容量と処理時間が増える代わりに、精度が改善する場合があります。
+
+```console
+speech2md transcribe meeting.wav --whisper small
+speech2md transcribe meeting.wav --prompt "Rust, Kubernetes, PostgreSQL"
+speech2md transcribe meeting.wav --prompt-file prompt.txt
+```
+
+長いプロンプトや機密性のある用語集には、UTF-8の`--prompt-file`を使用してください。
+`--prompt`と`--prompt-file`は同時に指定できません。
+
+## 出力例
+
+出力はCommonMarkの見出し、話者ラベル、開始時刻、発話本文で構成されます。
+
+```markdown
+# meeting
+
+**Speaker 1**（00:00:12）
+
+今回のリリースについて確認します。
+
+**Speaker 2**（00:00:18）
+
+API側の変更は完了しています。
+```
+
+## オフライン処理と保存場所
+
+音声デコード、文字起こし、話者分離、CommonMark生成はすべてローカルで行います。
+ネットワークへ接続するのは、利用者が`engine install`または`model install`を実行したときだけです。
+ログには音声、文字起こし本文、モデルURL、完全なファイルパスを記録しません。
+
+エンジンとモデルの既定の保存先は次のとおりです。
+
+| OS | エンジン | モデル |
+|---|---|---|
+| Windows | `%LOCALAPPDATA%\speech2md\data\engines` | `%LOCALAPPDATA%\speech2md\data\models` |
+| macOS | `~/Library/Application Support/speech2md/engines` | `~/Library/Application Support/speech2md/models` |
+| Linux | `$XDG_DATA_HOME/speech2md/engines` | `$XDG_DATA_HOME/speech2md/models` |
+
+Linuxで`XDG_DATA_HOME`が未設定の場合は`~/.local/share/speech2md`以下を使用します。
+絶対パスの`SPEECH2MD_ENGINE_DIR`と`SPEECH2MD_MODEL_DIR`で保存先を変更できます。
+
+## モデルの容量とライセンス
+
+`model install`を引数なしで実行すると、`whisper-base`と話者分離用の2モデルを導入します。
+`whisper-small`は使用する場合だけ個別に導入します。
+
+```console
+speech2md model install whisper-small
+```
+
+| モデル | 用途 | ダウンロードサイズ | ライセンス |
+|---|---|---:|---|
+| `whisper-base` | 文字起こし | 148 MB | MIT |
+| `whisper-small` | 文字起こし | 488 MB | MIT |
+| `speaker-segmentation` | 話者区間検出 | 6 MB | MIT |
+| `speaker-embedding` | 話者特徴量 | 40 MB | Apache-2.0 |
+
+サイズは埋め込みマニフェストのバイト数を10進MBへ丸めた値です。
+導入中は部分ファイルと完成ファイルが一時的に併存するため、表の合計より多い空き容量を確保してください。
+
+## 速度と精度
+
+処理時間はCPU、音声時間、モデル、話者数、話速によって変わります。
+通常の対象は最大1時間、追加用途の上限は3時間ですが、処理時間の保証値ではありません。
+
+| 測定環境 | 音声時間 | Whisper | 処理時間 | 実時間係数 | ピークメモリ | 一時ディスク |
+|---|---:|---|---:|---:|---:|---:|
+| Windows x86-64、16論理CPU | 1時間 | base | 未測定 | 未測定 | 未測定 | 約346 MB以上 |
+| Windows x86-64、16論理CPU | 3時間 | base | 未測定 | 未測定 | 未測定 | 約1.04 GB以上 |
+
+一時ディスクの値は16 kHz、mono、`float32` PCMと16-bit WAVの理論上の合計で、ファイルシステムなどの余白を含みません。
+実測値は実モデルと評価音声を準備した後に記録します。
+評価方法は[`docs/testing.md`](docs/testing.md)を参照してください。
+
+## 制約
+
+- 日本語の文字起こしだけを対象とし、英語への翻訳は行いません。
+- 話者名は推定せず、録音内の番号だけを割り当てます。
+- 話者が重なって発話する区間では、話者割り当てが不安定になる場合があります。
+- 要約、言い換え、フィラー除去、推測による誤認識修正は行いません。
+- 変換中は正規化PCMとwhisper.cpp用WAVを一時ディレクトリへ保存します。正常終了時と処理失敗時に削除します。
+
+## トラブルシューティング
+
+最初に診断結果を確認します。
+
+```console
+speech2md doctor
+```
+
+`engine: not installed`の場合は`speech2md engine install`、モデルが不足している場合は`speech2md model install`を実行します。
+出力先が存在するエラーでは、既存ファイルを確認してから必要な場合だけ`--force`を指定します。
+無効な`RUST_LOG`を設定している場合は、値を修正するか環境変数を削除します。
+
+詳細ログは標準エラーへ出力され、CommonMarkには混ざりません。
 
 ```powershell
-$env:SPEECH2MD_MODEL_DIR = "C:\path\to\models"
-$env:SPEECH2MD_DIARIZATION_FIXTURE = (Resolve-Path "samples\manjyu_kowai.wav")
-cargo test -p speech2md-runtime --test diarization_model -- --ignored --nocapture
-
-Remove-Item Env:SPEECH2MD_MODEL_DIR
-Remove-Item Env:SPEECH2MD_DIARIZATION_FIXTURE
+$env:RUST_LOG = "speech2md_runtime=debug,speech2md_cli=info"
+speech2md doctor
+Remove-Item Env:RUST_LOG
 ```
 
-`SPEECH2MD_MODEL_DIR`には次のファイルが必要です。
+## SRV-DBによる評価
 
-- `segmentation-3-0.onnx`
-- `3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx`
+話速別の外部評価には、電気通信大学 高橋弘太研究室の[話速バリエーション型音声データベース（SRV-DB）](https://www.it.cei.uec.ac.jp/SRV-DB/)を使用します。
+利用時は公式ページの条件を確認し、音声、原稿、推論本文をこのリポジトリへコミットしません。
+データセット4と5の配置、CERなどの指標、実行方法は[`docs/testing.md`](docs/testing.md)に記載しています。
 
-テストはネットワークへ接続せず、検出された話者IDが4種類あること、各発話区間が正の長さであること、開始時刻順に並ぶことを確認します。
-どちらかの環境変数が未設定の場合は、ローカル資産がない環境として処理を省略します。
+## 開発資料
 
-ローカル評価には、VOICEPEAK 6ナレーターで自作した「まんじゅうこわい」の会話音声を使用しています。
-[VOICEPEAKの利用許諾](https://www.ah-soft.com/voice/6nare/eula.html)に配慮し、生成音声そのものは配布せず、`samples/*.wav`をGitの管理対象から除外しています。
+- [設計仕様](docs/superpowers/specs/2026-09-25-speech2md-design.md)
+- [実装計画](docs/superpowers/plans/2026-09-25-speech2md-implementation.md)
+- [Leanによる話者割り当てモデル](formal/README.md)
+- [whisper.cppエンジンのビルド](engines/README.md)
 
 ## コミット前チェック
 
-コミット前の軽量チェックには[prek](https://github.com/j178/prek)を使用します。
-プロジェクトのRust 1.85では`cargo install prek`をビルドできないため、ビルド済みバイナリを導入する方法を使用してください。
+コミット前チェックには[prek](https://github.com/j178/prek)を使用します。
 
 ```powershell
 uv tool install prek
 prek install
-```
-
-フックはRust関連ファイルを変更したときだけ、次の検査を実行します。
-
-```powershell
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo test --workspace --all-features --locked
-```
-
-コミットせずに全ファイルを手動検査する場合は、次を実行します。
-
-```powershell
 prek run --all-files
 ```
 
-## ログ
-
-CLIは[`tracing`](https://github.com/tokio-rs/tracing)を使用し、ログを標準エラーへ出力します。
-Markdownなどの変換結果を標準出力へ書き出す場合も、ログは変換結果に混ざりません。
-
-既定ではspeech2md自身の`info`以上のログだけを出力し、依存ライブラリのログは出力しません。
-`RUST_LOG`を設定すると、ログレベルを全体またはクレート単位で変更できます。
-機密情報の混入を防ぐため、`RUST_LOG`で指定しても依存ライブラリのログは出力しません。
-
-```powershell
-$env:RUST_LOG = "speech2md=debug"
-cargo run -p speech2md-cli
-
-$env:RUST_LOG = "speech2md_runtime=debug,speech2md_cli=info"
-cargo run -p speech2md-cli
-
-Remove-Item Env:RUST_LOG
-```
-
-無効な`RUST_LOG`を指定した場合、CLIは設定を無視せずエラーで終了します。
-ログには音声、文字起こし本文、モデルのURL、完全なファイルパスを記録しません。
+フックはRust関連ファイルの変更時に`cargo fmt`、厳格な`cargo clippy`、workspaceテストを実行します。
 
 ## Fuzzing
 
-[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz)で、音声デコーダー境界とCommonMarkレンダラーを検査します。
-通常のpre-commitとGitHub Actionsには含めず、時間を区切って手動実行します。
-
-### Windowsの事前準備
-
-Visual Studio Installerから次のコンポーネントを導入します。
-
-- MSVC v143以降のC++ x64/x86ビルドツール
-- C++ AddressSanitizer
-- Windows 11 SDK
-
-インストール後は、スタートメニューから使用中のVisual Studioに対応する「x64 Native Tools Command Prompt」を起動してください。
-通常のPowerShellやコマンドプロンプトでは、別のVisual Studioに含まれる古いリンカーを参照する場合があります。
-
-次のコマンドで、64ビット版のMSVCリンカーを参照していることを確認できます。
-
-```console
-where link
-```
-
-複数の`link.exe`が表示された場合は、使用するVisual Studioの`Hostx64\x64`以下にあるものが先頭に表示されている必要があります。
-
-nightlyとcargo-fuzzを導入します。
+[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz)で音声デコーダー境界とCommonMarkレンダラーを検査します。
+通常のpre-commitとGitHub Actionsには含めません。
 
 ```console
 rustup toolchain install nightly
 cargo +stable install cargo-fuzz --version 0.13.2 --locked
-cargo fuzz --version
-```
-
-### Fuzzテストの実行
-
-リポジトリのルートへ移動し、「x64 Native Tools Command Prompt」から実行します。
-
-音声デコーダーでは、既存のWAV、MP3、M4A、音声なしMP4を初期corpusとして使用できます。
-次のコマンドはそれぞれ60秒間実行します。
-
-```console
+cargo +nightly fuzz check
 cargo +nightly fuzz run decode_audio fuzz/corpus/decode_audio crates/speech2md-runtime/tests/fixtures -- -max_total_time=60 -max_len=1048576
 cargo +nightly fuzz run render_commonmark -- -max_total_time=60 -max_len=65536
 ```
 
-実行回数を固定して短時間で確認する場合は、`-max_total_time`の代わりに`-runs`を指定します。
-
-```console
-cargo +nightly fuzz run decode_audio fuzz/corpus/decode_audio crates/speech2md-runtime/tests/fixtures -- -runs=200 -max_len=1048576
-cargo +nightly fuzz run render_commonmark -- -runs=1000 -max_len=65536
-```
-
-ビルドだけを確認する場合は次を実行します。
-
-```console
-cargo +nightly fuzz check
-```
-
-停止時は`Ctrl+C`を入力します。
-クラッシュやサニタイザー違反を検出した入力は、`fuzz/artifacts/<ターゲット名>/`に保存されます。
-生成されたcorpus、artifact、ビルド成果物はGitの管理対象に含めません。
-
-### Windowsでリンクに失敗する場合
-
-`clang_rt.asan`が見つからない場合は、Visual Studio Installerで「C++ AddressSanitizer」が導入済みか確認します。
-
-`dbghelp.lib`が見つからない場合は、Visual Studio Installerで「Windows 11 SDK」が導入済みか確認します。
-
-必要なコンポーネントが導入済みでも失敗する場合は、開いているシェルを閉じてから「x64 Native Tools Command Prompt」を起動し直してください。
-`where link`の先頭が意図したVisual Studioを指していなければ、正しいバージョンの開発者用プロンプトを使用します。
+WindowsではVisual StudioのMSVC C++ x64/x86ビルドツール、C++ AddressSanitizer、Windows 11 SDKが必要です。
+「x64 Native Tools Command Prompt」で`where link`を実行し、使用するVisual Studioの`Hostx64\x64`以下にあるリンカーが先頭に表示されることを確認してください。
+クラッシュ入力は`fuzz/artifacts/`へ保存され、Gitの管理対象には含まれません。
