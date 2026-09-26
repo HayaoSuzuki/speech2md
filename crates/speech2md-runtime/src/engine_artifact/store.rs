@@ -172,6 +172,12 @@ impl EngineLease {
     pub fn executable(&self) -> &Path {
         self.engine.executable()
     }
+
+    /// Returns the packaged engine version protected by this lease.
+    #[must_use]
+    pub fn version(&self) -> &str {
+        &self.engine.spec.version
+    }
 }
 
 /// Counts the outcomes of an engine prune operation.

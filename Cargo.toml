@@ -33,6 +33,9 @@ cargo_common_metadata = "allow"
 # Multiple versions can enter through native and test dependencies and are
 # audited through Cargo.lock rather than rejected categorically.
 multiple_crate_versions = "allow"
+# `test-support` is deliberately explicit because enabling it builds helper binaries
+# and exposes deterministic process controls that must never be mistaken for tests.
+redundant_feature_names = "allow"
 
 # Selected restriction lints that enforce project-wide safety properties.
 allow_attributes_without_reason = "deny"
