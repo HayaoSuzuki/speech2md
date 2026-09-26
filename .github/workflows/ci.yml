@@ -55,3 +55,6 @@ jobs:
 
       - name: Require complete formats coverage
         run: cargo llvm-cov -p speech2md-formats --all-features --fail-under-lines 100 --fail-under-functions 100
+
+      - name: Build release CLI
+        run: cargo build --release -p speech2md-cli --locked

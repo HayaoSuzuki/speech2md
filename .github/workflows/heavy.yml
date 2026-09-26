@@ -8,6 +8,11 @@ on:
         required: true
         default: false
         type: boolean
+      run_workspace_coverage:
+        description: Report full workspace coverage and missing lines
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -40,3 +45,17 @@ jobs:
         run: cargo install cargo-fuzz --version 0.13.2 --locked
       - name: Compile fuzz targets
         run: cargo +nightly fuzz check
+
+  workspace-coverage:
+    if: ${{ inputs.run_workspace_coverage }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.85.0
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Report workspace coverage
+        run: cargo llvm-cov --workspace --all-features --summary-only --show-missing-lines

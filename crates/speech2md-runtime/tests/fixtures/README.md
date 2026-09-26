@@ -17,3 +17,25 @@ ffmpeg -f lavfi -i "color=c=black:s=16x16:r=1:d=1" -an -c:v libx264 -pix_fmt yuv
 - `tone.*`: 2 seconds, 48 kHz stereo, 1 kHz sine wave
 - `silent.wav`: 2 seconds, 48 kHz stereo silence
 - `no-audio.mp4`: 1 second synthetic black video without an audio track
+
+## ローカルの実音声テスト
+
+VOICEPEAKで生成した音声とSRV-DBの音声および原稿はコミットしません。
+
+実モデルを使うテストでは、モデルとローカル音声を環境変数で指定します。
+
+```powershell
+$env:SPEECH2MD_MODEL_DIR = "C:\path\to\models"
+$env:SPEECH2MD_DIARIZATION_FIXTURE = (Resolve-Path "samples\manjyu_kowai.wav")
+cargo test -p speech2md-runtime --test diarization_model -- --ignored --nocapture
+```
+
+CLI全体を通す場合は、エンジンの配置先も指定します。
+
+```powershell
+$env:SPEECH2MD_ENGINE_DIR = "C:\path\to\engines"
+cargo test -p speech2md-cli --test real_cli -- --ignored --nocapture
+```
+
+通常のGitHub Actionsはモデルを取得せず、実モデルテストも実行しません。
+再配布可能な複数話者fixtureが用意できるまでは、実モデルE2Eをローカル専用とします。
