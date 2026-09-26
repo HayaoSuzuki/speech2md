@@ -101,7 +101,11 @@ impl EngineManifest {
                     spec.platform
                 )));
             }
-            if spec.version.trim().is_empty()
+            let version_is_safe = !spec.version.trim().is_empty()
+                && !spec.version.contains(['/', '\\', ':'])
+                && spec.version != "."
+                && spec.version != "..";
+            if !version_is_safe
                 || spec.url.scheme() != "https"
                 || spec.size == 0
                 || !hash_is_valid
