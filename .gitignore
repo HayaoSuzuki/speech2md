@@ -1,6 +1,7 @@
 /formal/.lake/
 /.lean-elan-init.ps1
 /target/
+/dist/
 /test-data/srv-db/
 *.part
 /fuzz/artifacts/

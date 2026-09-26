@@ -5,6 +5,39 @@
 
 話者割り当ての純粋なドメインモデルはLeanでも検証しています。Windowsでの実行方法、証明済みの性質、Rustテスト用JSONの生成方法は[`formal/README.md`](formal/README.md)を参照してください。
 
+## 文字起こしエンジン
+
+文字起こしには、speech2md用にビルドしたCPU版`whisper-cli`を使用します。
+通常の文字起こし処理中にエンジンをダウンロードすることはありません。
+初回セットアップ時に、利用者が明示的に次のコマンドを実行します。
+
+```console
+speech2md engine install
+speech2md engine list
+speech2md engine verify
+speech2md engine prune
+```
+
+`install`だけがGitHub Releasesへ接続します。
+ダウンロードしたアーカイブはSHA-256とサイズを検査してから展開し、`verify`は保存済み実行ファイルを再検査します。
+現在のマニフェストに成果物がないOSでは、架空のURLへ接続せず、未提供であることを示すエラーになります。
+
+既定の保存先はOSごとのユーザーデータディレクトリ以下です。
+
+- Windows: `%LOCALAPPDATA%\speech2md\engines`
+- macOS: `~/Library/Application Support/speech2md/engines`
+- Linux: `$XDG_DATA_HOME/speech2md/engines`（未設定時は`~/.local/share/speech2md/engines`）
+
+アーカイブ、展開用一時領域、導入済みエンジンが一時的に併存します。
+セットアップ前にはアーカイブサイズの数倍の空き容量を確保し、古い版は`engine prune`で削除してください。
+
+長い日本語プロンプトはコマンドラインへ本文を渡さず、UTF-8ファイルを`--prompt-file`で渡します。
+このオプションはspeech2mdのビルドに含まれるwhisper.cppパッチで追加しており、プロンプト本文をヘルプやエラー出力へ表示しません。
+
+エンジンを自分でビルドする手順、固定した上流コミット、成果物の検証・公開手順は[`engines/README.md`](engines/README.md)にあります。
+WindowsではVisual StudioのC++ x64ビルドツールとCMake、macOSではXcode Command Line ToolsとCMake、LinuxではC++コンパイラとCMakeが必要です。
+ローカル検証では任意で手元のモデルと短いWAVを渡せますが、モデルや音声は成果物にもリポジトリにも含めません。
+
 ## コミット前チェック
 
 コミット前の軽量チェックには[prek](https://github.com/j178/prek)を使用します。
