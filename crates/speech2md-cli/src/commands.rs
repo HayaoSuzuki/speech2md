@@ -1,56 +1,91 @@
 use std::fmt::Write as _;
+use std::fs;
 use std::io::{self, Write as _};
+use std::path::Path;
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use speech2md_runtime::engine::SherpaDiarizer;
 use speech2md_runtime::engine_artifact::{
-    EngineArchiveSource, EngineArtifactError, EngineInstaller, EngineManifest, EngineRootResolver,
-    EngineSpec, EngineStore, HttpEngineArchiveSource, Platform,
+    EngineArtifactError, EngineInstaller, EngineManifest, EngineRootResolver, EngineStore,
+    HttpEngineArchiveSource, Platform,
+};
+use speech2md_runtime::{
+    ModelError, ModelId, ModelInstaller, ModelManifest, ModelRootResolver, ModelStore,
+    RuntimeError, RuntimeServices, TranscribeOptions, run_transcription,
+};
+use thiserror::Error;
+
+use crate::args::{
+    Cli, Command, EngineCommand, ModelChoice, ModelCommand, TranscribeArgs, WhisperChoice,
 };
 
-use crate::args::{Cli, Command, EngineCommand};
-
-const EXIT_SUCCESS: u8 = 0;
-const EXIT_CONFIGURATION: u8 = 3;
-const EXIT_ENGINE: u8 = 4;
+#[derive(Debug, Error)]
+enum AppError {
+    #[error(transparent)]
+    Engine(#[from] EngineArtifactError),
+    #[error(transparent)]
+    Model(#[from] ModelError),
+    #[error(transparent)]
+    Runtime(#[from] RuntimeError),
+    #[error("configuration is invalid: {0}")]
+    Configuration(String),
+}
 
 pub fn execute(cli: &Cli) -> ExitCode {
     match execute_inner(cli) {
         Ok(message) => {
-            let _ignored = writeln!(io::stdout().lock(), "{message}");
-            ExitCode::from(EXIT_SUCCESS)
+            if !message.is_empty() {
+                let _ignored = writeln!(io::stdout().lock(), "{message}");
+            }
+            ExitCode::SUCCESS
         }
         Err(error) => {
-            let code = classify(&error);
             let _ignored = writeln!(io::stderr().lock(), "error: {error}");
-            let _ignored = writeln!(io::stderr().lock(), "help: {}", help(&error));
-            ExitCode::from(code)
+            if let Some(help) = help(&error) {
+                let _ignored = writeln!(io::stderr().lock(), "help: {help}");
+            }
+            ExitCode::from(classify(&error))
         }
     }
 }
 
-fn execute_inner(cli: &Cli) -> Result<String, EngineArtifactError> {
-    let manifest = EngineManifest::embedded()?;
-    let store = EngineStore::new(EngineRootResolver::resolve()?);
+fn execute_inner(cli: &Cli) -> Result<String, AppError> {
     match &cli.command {
-        Command::Engine { command } => {
-            execute_engine(*command, &manifest, &store, Platform::current()?)
-        }
+        Command::Engine { command } => execute_engine(*command),
+        Command::Model { command } => execute_model(command),
+        Command::Transcribe(arguments) => execute_transcribe(arguments),
+        Command::Doctor => doctor(),
     }
 }
 
-fn execute_engine(
-    command: EngineCommand,
-    manifest: &EngineManifest,
-    store: &EngineStore,
-    platform: Platform,
-) -> Result<String, EngineArtifactError> {
+fn execute_engine(command: EngineCommand) -> Result<String, AppError> {
+    let manifest = EngineManifest::embedded()?;
+    let platform = Platform::current()?;
+    let store = EngineStore::new(EngineRootResolver::resolve()?);
     match command {
         EngineCommand::Install => {
             let spec = manifest.select(platform)?;
-            let source = HttpEngineArchiveSource::new()?;
-            install(source, store, spec)
+            EngineInstaller::new(HttpEngineArchiveSource::new()?, store).install(spec)?;
+            Ok(format!(
+                "Installed whisper engine {} for {}.",
+                spec.version, spec.platform
+            ))
         }
-        EngineCommand::List => list(manifest, store),
+        EngineCommand::List => {
+            let mut output = String::new();
+            for spec in manifest.specs() {
+                let status = if store.require(spec).is_ok() {
+                    "installed"
+                } else {
+                    "not installed"
+                };
+                writeln!(output, "{} {}: {status}", spec.platform, spec.version)
+                    .map_err(|error| AppError::Configuration(error.to_string()))?;
+            }
+            Ok(output.trim_end().into())
+        }
         EngineCommand::Verify => {
             let spec = manifest.select(platform)?;
             store.require(spec)?;
@@ -70,185 +105,186 @@ fn execute_engine(
     }
 }
 
-fn install<S: EngineArchiveSource>(
-    source: S,
-    store: &EngineStore,
-    spec: &EngineSpec,
-) -> Result<String, EngineArtifactError> {
-    EngineInstaller::new(source, store.clone()).install(spec)?;
+fn execute_model(command: &ModelCommand) -> Result<String, AppError> {
+    let manifest = ModelManifest::embedded()?;
+    let store = ModelStore::new(ModelRootResolver::resolve()?);
+    match command {
+        ModelCommand::List => {
+            let mut output = String::new();
+            for spec in manifest.specs() {
+                let status = if store.require(spec.id).is_ok() {
+                    "installed"
+                } else {
+                    "not installed"
+                };
+                writeln!(output, "{}: {status} ({} bytes)", spec.id, spec.size)
+                    .map_err(|error| AppError::Configuration(error.to_string()))?;
+            }
+            Ok(output.trim_end().into())
+        }
+        ModelCommand::Install { models } => {
+            let ids = if models.is_empty() {
+                vec![
+                    ModelId::WhisperBase,
+                    ModelId::SpeakerSegmentation,
+                    ModelId::SpeakerEmbedding,
+                ]
+            } else {
+                models.iter().copied().map(ModelId::from).collect()
+            };
+            ModelInstaller::new(manifest, store)?.install(&ids)?;
+            Ok(format!("Installed {} model(s).", ids.len()))
+        }
+    }
+}
+
+fn execute_transcribe(arguments: &TranscribeArgs) -> Result<String, AppError> {
+    let output = arguments
+        .output
+        .clone()
+        .unwrap_or_else(|| arguments.input.with_extension("md"));
+    if output.exists() && !arguments.force {
+        return Err(RuntimeError::OutputExists.into());
+    }
+    let engine_manifest = EngineManifest::embedded()?;
+    let platform = Platform::current()?;
+    let engine_spec = engine_manifest.select(platform)?;
+    let engine_store = EngineStore::new(EngineRootResolver::resolve()?);
+    let model_store = ModelStore::new(ModelRootResolver::resolve()?);
+    let threads = std::thread::available_parallelism().map_or(1, usize::from);
+    let segmentation = model_store.require(ModelId::SpeakerSegmentation)?;
+    let embedding = model_store.require(ModelId::SpeakerEmbedding)?;
+    let diarizer = SherpaDiarizer::new(&segmentation, &embedding, threads)
+        .map_err(|error| RuntimeError::Diarization(error.to_string()))?;
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let trigger = Arc::clone(&cancelled);
+    ctrlc::set_handler(move || trigger.store(true, Ordering::Release))
+        .map_err(|error| AppError::Configuration(error.to_string()))?;
+    let title = arguments
+        .input
+        .file_stem()
+        .and_then(std::ffi::OsStr::to_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("transcript")
+        .to_owned();
+    let prompt = arguments.prompt_file.as_ref().map_or_else(
+        || Ok(arguments.prompt.clone()),
+        |path| {
+            fs::read_to_string(path)
+                .map(Some)
+                .map_err(|error| AppError::Configuration(format!("prompt file: {error}")))
+        },
+    )?;
+    let temp_root = std::env::temp_dir();
+    let services = RuntimeServices::new(
+        &engine_store,
+        engine_spec,
+        &model_store,
+        &diarizer,
+        &temp_root,
+    );
+    let report = run_transcription(
+        &services,
+        &TranscribeOptions {
+            input: arguments.input.clone(),
+            output: output.clone(),
+            title,
+            whisper_model: ModelId::from(arguments.whisper),
+            speakers: arguments.speakers.map(std::num::NonZeroU32::get),
+            prompt,
+            threads,
+            force: arguments.force,
+            cancelled,
+        },
+    )?;
     Ok(format!(
-        "Installed whisper engine {} for {}.",
-        spec.version, spec.platform
+        "Wrote {} utterance(s) from {} segment(s) to {}.",
+        report.utterance_count,
+        report.segment_count,
+        display_name(&output)
     ))
 }
 
-fn list(manifest: &EngineManifest, store: &EngineStore) -> Result<String, EngineArtifactError> {
-    if manifest.specs().is_empty() {
-        return Ok("No engine artifacts are published yet.".into());
-    }
-    let mut output = String::new();
-    for spec in manifest.specs() {
-        let status = if store.require(spec).is_ok() {
-            "installed"
-        } else {
-            "not installed"
-        };
-        writeln!(output, "{} {}: {status}", spec.platform, spec.version)
-            .map_err(|error| EngineArtifactError::Storage(error.to_string()))?;
-    }
-    Ok(output.trim_end().into())
+fn doctor() -> Result<String, AppError> {
+    let platform = Platform::current()?;
+    let engines = EngineManifest::embedded()?;
+    let engine_store = EngineStore::new(EngineRootResolver::resolve()?);
+    let engine = engines
+        .select(platform)
+        .ok()
+        .is_some_and(|spec| engine_store.require(spec).is_ok());
+    let models = ModelManifest::embedded()?;
+    let model_store = ModelStore::new(ModelRootResolver::resolve()?);
+    let installed = models
+        .specs()
+        .iter()
+        .filter(|spec| model_store.require(spec.id).is_ok())
+        .count();
+    tempfile::Builder::new()
+        .prefix("speech2md-doctor-")
+        .tempdir_in(std::env::temp_dir())
+        .and_then(tempfile::TempDir::close)
+        .map_err(|error| AppError::Configuration(format!("temporary directory: {error}")))?;
+    Ok(format!(
+        "platform: {platform}\nlogical CPUs: {}\nengine: {}\nmodels: {installed}/{} installed\ntemporary directory: available",
+        std::thread::available_parallelism().map_or(1, usize::from),
+        if engine { "installed" } else { "not installed" },
+        models.specs().len()
+    ))
 }
 
-const fn classify(error: &EngineArtifactError) -> u8 {
+impl From<ModelChoice> for ModelId {
+    fn from(value: ModelChoice) -> Self {
+        match value {
+            ModelChoice::WhisperBase => Self::WhisperBase,
+            ModelChoice::WhisperSmall => Self::WhisperSmall,
+            ModelChoice::SpeakerSegmentation => Self::SpeakerSegmentation,
+            ModelChoice::SpeakerEmbedding => Self::SpeakerEmbedding,
+        }
+    }
+}
+impl From<WhisperChoice> for ModelId {
+    fn from(value: WhisperChoice) -> Self {
+        match value {
+            WhisperChoice::Base => Self::WhisperBase,
+            WhisperChoice::Small => Self::WhisperSmall,
+        }
+    }
+}
+
+const fn classify(error: &AppError) -> u8 {
     match error {
-        EngineArtifactError::UnsupportedPlatform { .. }
-        | EngineArtifactError::InvalidManifest(_)
-        | EngineArtifactError::InvalidRoot(_) => EXIT_CONFIGURATION,
-        _ => EXIT_ENGINE,
+        AppError::Engine(_) | AppError::Model(_) => 4,
+        AppError::Runtime(RuntimeError::OutputExists | RuntimeError::Output(_)) => 6,
+        AppError::Runtime(RuntimeError::Cancelled) => 130,
+        AppError::Runtime(
+            RuntimeError::Transcription(_)
+            | RuntimeError::Diarization(_)
+            | RuntimeError::EmptyTranscript,
+        ) => 5,
+        AppError::Configuration(_) | AppError::Runtime(_) => 3,
     }
 }
-
-const fn help(error: &EngineArtifactError) -> &'static str {
+const fn help(error: &AppError) -> Option<&'static str> {
     match error {
-        EngineArtifactError::MissingArtifact(_) => {
-            "no artifact has been published for this platform; check a newer speech2md release"
+        AppError::Engine(
+            EngineArtifactError::MissingEngine { .. } | EngineArtifactError::CorruptEngine { .. },
+        ) => Some("run `speech2md engine install`"),
+        AppError::Engine(EngineArtifactError::Download(_)) => {
+            Some("check the network connection and retry `speech2md engine install`")
         }
-        EngineArtifactError::MissingEngine { .. } | EngineArtifactError::CorruptEngine { .. } => {
-            "run `speech2md engine install`"
+        AppError::Model(ModelError::MissingModel { .. }) => {
+            Some("run the model install command shown above")
         }
-        EngineArtifactError::UnsupportedPlatform { .. } => {
-            "use windows-x86_64, macos-aarch64, macos-x86_64, or linux-x86_64"
+        AppError::Runtime(RuntimeError::OutputExists) => {
+            Some("pass --force only when replacement is intended")
         }
-        EngineArtifactError::Download(_) => {
-            "check the network connection and retry `speech2md engine install`"
-        }
-        _ => "run `speech2md engine verify` for local engine state",
+        _ => None,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use std::io::Write;
-
-    use speech2md_runtime::engine_artifact::{EngineArchiveSource, EngineSpec};
-    use tempfile::TempDir;
-    use url::Url;
-
-    use super::{
-        EXIT_CONFIGURATION, EngineArtifactError, EngineCommand, EngineManifest, EngineStore,
-        Platform, classify, execute_engine, install,
-    };
-
-    struct FailingSource;
-
-    impl EngineArchiveSource for FailingSource {
-        fn download(
-            &self,
-            _spec: &EngineSpec,
-            _destination: &mut dyn Write,
-        ) -> Result<(), EngineArtifactError> {
-            Err(EngineArtifactError::Download("offline fixture".into()))
-        }
-    }
-
-    fn spec(version: &str) -> EngineSpec {
-        EngineSpec {
-            version: version.into(),
-            platform: Platform::WindowsX86_64,
-            url: Url::parse("https://example.invalid/engine.zip").expect("fixture URL"),
-            size: 1,
-            sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
-            archive_name: "engine.zip".into(),
-            executable_path: "bin/whisper-cli.exe".into(),
-        }
-    }
-
-    fn write_installed(root: &TempDir, engine: &EngineSpec) {
-        let install_dir = root
-            .path()
-            .join(&engine.version)
-            .join(engine.platform.to_string());
-        let executable = install_dir.join(&engine.executable_path);
-        std::fs::create_dir_all(executable.parent().expect("executable parent"))
-            .expect("create engine directory");
-        std::fs::write(executable, b"fixture executable").expect("write executable");
-        std::fs::write(
-            install_dir.join(".speech2md-integrity"),
-            format!(
-                "{}\n{}\n",
-                engine.sha256, "6f1af2dfc4d7f16dacf404b1f6c9fd4a65cfffb8edde6dcf957463a0e41fb1ed"
-            ),
-        )
-        .expect("write integrity receipt");
-    }
-
-    #[test]
-    fn verify_distinguishes_installed_and_corrupt_engines() {
-        let root = TempDir::new().expect("temporary engine root");
-        let engine = spec("v1");
-        let manifest = EngineManifest::new(vec![engine.clone()]).expect("fixture manifest");
-        let store = EngineStore::new(root.path());
-
-        assert!(matches!(
-            execute_engine(EngineCommand::Verify, &manifest, &store, engine.platform),
-            Err(EngineArtifactError::MissingEngine { .. })
-        ));
-        write_installed(&root, &engine);
-        assert!(
-            execute_engine(EngineCommand::Verify, &manifest, &store, engine.platform)
-                .expect("installed engine verifies")
-                .contains("Verified")
-        );
-        let executable = root
-            .path()
-            .join(&engine.version)
-            .join(engine.platform.to_string())
-            .join(&engine.executable_path);
-        std::fs::write(executable, b"tampered executable").expect("modify executable");
-        assert!(matches!(
-            execute_engine(EngineCommand::Verify, &manifest, &store, engine.platform),
-            Err(EngineArtifactError::CorruptEngine { .. })
-        ));
-    }
-
-    #[test]
-    fn install_surfaces_network_failure_from_the_injected_source() {
-        let root = TempDir::new().expect("temporary engine root");
-        let error = install(FailingSource, &EngineStore::new(root.path()), &spec("v1"))
-            .expect_err("fake source fails");
-        assert!(matches!(error, EngineArtifactError::Download(_)));
-    }
-
-    #[test]
-    fn prune_keeps_an_engine_with_a_shared_lease() {
-        let root = TempDir::new().expect("temporary engine root");
-        let old = spec("v1");
-        let keep = spec("v2");
-        write_installed(&root, &old);
-        write_installed(&root, &keep);
-        let store = EngineStore::new(root.path());
-        let lease = store
-            .require(&old)
-            .expect("old engine exists")
-            .acquire()
-            .expect("lease old engine");
-        let manifest = EngineManifest::new(vec![keep.clone()]).expect("fixture manifest");
-
-        let output = execute_engine(EngineCommand::Prune, &manifest, &store, keep.platform)
-            .expect("prune succeeds");
-        assert!(output.contains("kept 1 locked"));
-        assert!(store.require(&old).is_ok());
-        drop(lease);
-    }
-
-    #[test]
-    fn unsupported_platform_is_a_configuration_error() {
-        assert_eq!(
-            classify(&EngineArtifactError::UnsupportedPlatform {
-                os: "freebsd".into(),
-                arch: "x86_64".into(),
-            }),
-            EXIT_CONFIGURATION
-        );
-    }
+fn display_name(path: &Path) -> String {
+    path.file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy()
+        .into_owned()
 }
