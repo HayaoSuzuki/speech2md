@@ -1,0 +1,16 @@
+[package]
+name = "speech2md-formats"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+speech2md-core = { path = "../speech2md-core" }
+
+[dev-dependencies]
+proptest = "1"
+pulldown-cmark = "0.13"

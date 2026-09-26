@@ -1,0 +1,13 @@
+/formal/.lake/
+/.lean-elan-init.ps1
+/target/
+/dist/
+/test-data/srv-db/
+/test-data/srv-db-results/
+/test-data/performance/
+/samples/*.wav
+/samples/voicepeak/
+*.part
+/fuzz/artifacts/
+/fuzz/corpus/
+/fuzz/target/

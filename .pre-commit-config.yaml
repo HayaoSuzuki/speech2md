@@ -1,0 +1,30 @@
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        language: system
+        entry: cargo fmt --all -- --check
+        pass_filenames: false
+        files: '(^|/)(.*\.rs|rustfmt\.toml)$'
+
+      - id: cargo-fmt-fuzz
+        name: cargo fmt (fuzz)
+        language: system
+        entry: cargo fmt --manifest-path fuzz/Cargo.toml -- --check
+        pass_filenames: false
+        files: '^fuzz/(Cargo\.toml|.*\.rs)$'
+
+      - id: cargo-clippy
+        name: cargo clippy
+        language: system
+        entry: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+        pass_filenames: false
+        files: '(^|/)(.*\.rs|Cargo\.toml|Cargo\.lock|clippy\.toml|rust-toolchain\.toml)$'
+
+      - id: cargo-test
+        name: cargo test
+        language: system
+        entry: cargo test --workspace --all-features --locked
+        pass_filenames: false
+        files: '(^|/)(.*\.rs|Cargo\.toml|Cargo\.lock|rust-toolchain\.toml)$'

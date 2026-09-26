@@ -1,0 +1,17 @@
+{
+  "systeminfo": "whisper.cpp fixture",
+  "model": { "type": "base", "multilingual": true },
+  "result": { "language": "ja" },
+  "transcription": [
+    {
+      "timestamps": { "from": "00:00:00,120", "to": "00:00:01,530" },
+      "offsets": { "from": 120, "to": 1530 },
+      "text": " Rustの設計を確認します。"
+    },
+    {
+      "timestamps": { "from": "00:00:01,530", "to": "00:00:02,000" },
+      "offsets": { "from": 1530, "to": 2000 },
+      "text": " はい。"
+    }
+  ]
+}

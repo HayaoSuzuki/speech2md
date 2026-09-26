@@ -1,0 +1,56 @@
+[workspace]
+members = [
+  "crates/speech2md-core",
+  "crates/speech2md-formats",
+  "crates/speech2md-runtime",
+  "crates/speech2md-cli",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[workspace.dependencies]
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -1 }
+
+# Internal workspace crates are not published independently, so registry
+# metadata is intentionally maintained in the user-facing README instead.
+cargo_common_metadata = "allow"
+# Multiple versions can enter through native and test dependencies and are
+# audited through Cargo.lock rather than rejected categorically.
+multiple_crate_versions = "allow"
+# `test-support` is deliberately explicit because enabling it builds helper binaries
+# and exposes deterministic process controls that must never be mistaken for tests.
+redundant_feature_names = "allow"
+
+# Selected restriction lints that enforce project-wide safety properties.
+allow_attributes_without_reason = "deny"
+dbg_macro = "deny"
+exit = "deny"
+filetype_is_file = "deny"
+lossy_float_literal = "deny"
+mem_forget = "deny"
+panic_in_result_fn = "deny"
+print_stderr = "deny"
+print_stdout = "deny"
+rc_buffer = "deny"
+rest_pat_in_fully_bound_structs = "deny"
+string_to_string = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"
+verbose_file_reads = "deny"
