@@ -13,6 +13,23 @@ Remove-Item Env:SPEECH2MD_VOICEPEAK_DIR
 期待話者数と検出話者数の不一致は観測値としてJSONへ記録し、それだけでテストを失敗させません。
 本文の欠落と異常終了は後段のLLMで回復できないため、テストの失敗条件です。
 
+## 実CLIの縦断テスト
+
+自作の4話者音声、導入済みエンジン、3種類の既定モデルを使い、音声入力からCommonMark出力までを検証します。
+次の例はWindowsの既定保存先を使用します。
+
+```powershell
+$env:SPEECH2MD_ENGINE_DIR = (Resolve-Path (Join-Path $env:LOCALAPPDATA "speech2md\data\engines"))
+$env:SPEECH2MD_MODEL_DIR = (Resolve-Path (Join-Path $env:LOCALAPPDATA "speech2md\data\models"))
+$env:SPEECH2MD_DIARIZATION_FIXTURE = (Resolve-Path "samples\voicepeak\balanced-4speakers.wav")
+cargo test -p speech2md-cli --test real_cli --locked -- --ignored --nocapture
+Remove-Item Env:SPEECH2MD_ENGINE_DIR, Env:SPEECH2MD_MODEL_DIR, Env:SPEECH2MD_DIARIZATION_FIXTURE
+```
+
+このテストは文字起こしの成功、2個以上かつ指定数以下の話者ラベル、時刻順、非空本文、CommonMark構造を検査します。
+話者数の完全一致は保証しません。
+話者分離の品質変化は、前節のVOICEPEAK評価が出力するケース別の検出話者数で確認します。
+
 ## 通常のテスト
 
 モデルとネットワークを使わないテストは、Windowsのローカル環境とLinuxのGitHub Actionsで実行します。
