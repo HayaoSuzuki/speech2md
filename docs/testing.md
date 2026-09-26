@@ -1,6 +1,17 @@
 # テストと外部評価
 
 VOICEPEAKで作成する自作音声による話者分離テストは、[VOICEPEAK話者分離テスト原稿](../test-data/voicepeak/README.md)を参照してください。
+生成した10本のWAVに対し、Whisperを使わず話者分離だけを連続評価できます。
+
+```powershell
+$env:SPEECH2MD_VOICEPEAK_DIR = (Resolve-Path "samples\voicepeak")
+cargo test -p speech2md-runtime --test voicepeak_eval --locked -- --ignored --nocapture
+Remove-Item Env:SPEECH2MD_VOICEPEAK_DIR
+```
+
+テストはケースごとの検出話者数、クラスタごとの発話時間、処理時間、実時間係数を1個のJSONとして標準出力へ書きます。
+期待話者数と検出話者数の不一致は観測値としてJSONへ記録し、それだけでテストを失敗させません。
+本文の欠落と異常終了は後段のLLMで回復できないため、テストの失敗条件です。
 
 ## 通常のテスト
 
@@ -17,6 +28,14 @@ cargo test --workspace --all-features --locked
 ```console
 cargo +nightly test --workspace --all-features --locked -- -Z unstable-options --shuffle --test-threads=1
 ```
+
+話者割り当てのfuzz targetは、時刻付きトークンと話者区間の任意の組み合わせに対し、本文が欠落せず時刻順に保たれることを検査します。
+
+```console
+cargo +nightly fuzz run assign_speakers
+```
+
+Windowsで`STATUS_DLL_NOT_FOUND`が発生する場合は、Visual StudioのMSVC x64ディレクトリにある`clang_rt.asan_dynamic-x86_64.dll`を`PATH`から参照できるDeveloper PowerShellで実行します。
 
 `speech2md-core`と`speech2md-formats`は、行と関数のカバレッジを100%に保ちます。
 runtimeとCLIでは、ネイティブエンジン、OSエラー、プロセス終了タイミングなどの外部境界を実装内テストだけで網羅できないため、fake engine、ignored実モデルテスト、外部評価を併用します。

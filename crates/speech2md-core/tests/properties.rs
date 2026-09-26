@@ -1,7 +1,8 @@
 use proptest::prelude::*;
 use speech2md_core::{
-    NormalizationConfig, OverlapRatio, SpeakerId, TimeSpan, Timestamp, Utterance,
-    normalize_utterances, overlap_ms,
+    AssignmentConfig, NormalizationConfig, OverlapRatio, SpeakerId, SpeakerTurn, TimeSpan,
+    TimedToken, Timestamp, TranscribedSegment, Utterance, assign_speakers, normalize_utterances,
+    overlap_ms,
 };
 
 fn make_utterances(values: &[(u16, u16, u8)]) -> Vec<Utterance> {
@@ -87,5 +88,49 @@ proptest! {
         prop_assert!(result.iter().all(|item| item.span.start() <= item.span.end()));
         prop_assert_eq!(result.iter().map(|item| item.text.as_str()).collect::<String>(), expected_text);
         prop_assert_eq!(normalize_utterances(result.clone(), &config), result);
+    }
+
+    #[test]
+    fn speaker_assignment_preserves_all_token_text_and_ignores_turn_order(
+        token_values in prop::collection::vec((0_u16..10_000, 1_u16..1_000, any::<u8>()), 0..100),
+        turn_values in prop::collection::vec((0_u16..10_000, 1_u16..2_000, 0_u8..8), 0..100),
+    ) {
+        let tokens = token_values
+            .iter()
+            .enumerate()
+            .map(|(index, &(start, duration, _))| TimedToken {
+                span: TimeSpan::new(
+                    Timestamp::from_millis(u64::from(start)),
+                    Timestamp::from_millis(u64::from(start) + u64::from(duration)),
+                ).expect("generated token span is ordered"),
+                text: format!("<{index}>"),
+            })
+            .collect::<Vec<_>>();
+        let mut sorted_tokens = tokens.clone();
+        sorted_tokens.sort_by_key(|token| (token.span.start(), token.span.end()));
+        let expected_text = sorted_tokens.iter().map(|token| token.text.as_str()).collect::<String>();
+        let transcript = vec![TranscribedSegment {
+            span: TimeSpan::new(Timestamp::from_millis(0), Timestamp::from_millis(11_000))
+                .expect("literal segment span is ordered"),
+            text: expected_text.clone(),
+            confidence: None,
+            tokens,
+        }];
+        let turns = turn_values.iter().map(|&(start, duration, speaker)| SpeakerTurn {
+            span: TimeSpan::new(
+                Timestamp::from_millis(u64::from(start)),
+                Timestamp::from_millis(u64::from(start) + u64::from(duration)),
+            ).expect("generated speaker span is ordered"),
+            speaker: SpeakerId::new(u32::from(speaker)),
+            confidence: None,
+        }).collect::<Vec<_>>();
+        let mut reversed_turns = turns.clone();
+        reversed_turns.reverse();
+
+        let assigned = assign_speakers(&transcript, &turns, &AssignmentConfig::default());
+        let reversed = assign_speakers(&transcript, &reversed_turns, &AssignmentConfig::default());
+
+        prop_assert_eq!(assigned.iter().map(|item| item.text.as_str()).collect::<String>(), expected_text);
+        prop_assert_eq!(assigned, reversed);
     }
 }

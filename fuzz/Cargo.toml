@@ -36,5 +36,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "assign_speakers"
+path = "fuzz_targets/assign_speakers.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
 members = ["."]
