@@ -29,5 +29,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "whisper_json"
+path = "fuzz_targets/whisper_json.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
 members = ["."]
