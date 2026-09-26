@@ -159,7 +159,7 @@ fn build_config_from_text(
     }
     let num_clusters = request
         .num_speakers
-        .map_or(Ok(0), |count| {
+        .map_or(Ok(-1), |count| {
             i32::try_from(count).map_err(|error| error.to_string())
         })
         .map_err(EngineError::InvalidConfig)?;
@@ -287,7 +287,7 @@ mod tests {
         )
         .expect("exact clustering config is valid");
 
-        assert_eq!(automatic.clustering.num_clusters, 0);
+        assert_eq!(automatic.clustering.num_clusters, -1);
         assert_eq!(exact.clustering.num_clusters, 3);
         assert_eq!(automatic.segmentation.num_threads, 2);
         assert_eq!(automatic.segmentation.provider.as_deref(), Some("cpu"));

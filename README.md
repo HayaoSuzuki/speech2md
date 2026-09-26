@@ -155,8 +155,8 @@ speech2md model install whisper-small
 
 | 測定環境 | 音声時間 | Whisper | 処理時間 | 実時間係数 | ピークメモリ | 一時ディスク |
 |---|---:|---|---:|---:|---:|---:|
-| Windows x86-64、16論理CPU | 1時間 | base | 未測定 | 未測定 | 未測定 | 約346 MB以上 |
-| Windows x86-64、16論理CPU | 3時間 | base | 未測定 | 未測定 | 未測定 | 約1.04 GB以上 |
+| AMD Ryzen 7 PRO 7840U、16論理CPU | 1時間 | base | 未測定 | 未測定 | 未測定 | 約346 MB以上 |
+| AMD Ryzen 7 PRO 7840U、16論理CPU | 3時間 | base | 未測定 | 未測定 | 未測定 | 約1.04 GB以上 |
 
 一時ディスクの値は16 kHz、mono、`float32` PCMと16-bit WAVの理論上の合計で、ファイルシステムなどの余白を含みません。
 実測値は実モデルと評価音声を準備した後に記録します。

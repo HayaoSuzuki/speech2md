@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use speech2md_runtime::decode_to_pcm;
@@ -19,10 +19,11 @@ fn diarizes_a_local_four_speaker_fixture_without_downloading() {
     );
     let temporary = tempfile::tempdir().expect("temporary processing root");
     let pcm = decode_to_pcm(&fixture, temporary.path()).expect("decode fixture");
+    let threads = std::thread::available_parallelism().map_or(1, usize::from);
     let diarizer = SherpaDiarizer::new(
         &model_root.join("segmentation-3-0.onnx"),
         &model_root.join("3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"),
-        1,
+        threads,
     )
     .expect("initialize sherpa-onnx");
     let turns = diarizer
@@ -35,13 +36,14 @@ fn diarizes_a_local_four_speaker_fixture_without_downloading() {
         .expect("diarize fixture");
 
     assert!(!turns.is_empty());
+    let mut speaker_durations = BTreeMap::<u32, u64>::new();
+    for turn in &turns {
+        *speaker_durations.entry(turn.speaker.as_u32()).or_default() += turn.span.duration_ms();
+    }
     assert_eq!(
-        turns
-            .iter()
-            .map(|turn| turn.speaker.as_u32())
-            .collect::<BTreeSet<_>>()
-            .len(),
-        4
+        speaker_durations.len(),
+        4,
+        "speaker durations: {speaker_durations:?}"
     );
     assert!(turns.iter().all(|turn| turn.span.duration_ms() > 0));
     assert!(
