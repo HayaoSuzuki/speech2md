@@ -18,9 +18,12 @@ pub enum EngineError {
     /// `whisper-cli` did not emit its documented JSON shape.
     #[error("invalid whisper JSON: {0}")]
     InvalidJson(String),
-    /// A transcription segment has invalid or unordered timestamps.
-    #[error("invalid whisper segment: {0}")]
+    /// A native inference segment has invalid values or unordered timestamps.
+    #[error("invalid engine segment: {0}")]
     InvalidSegment(String),
+    /// An engine request contains an invalid option combination or value.
+    #[error("invalid engine configuration: {0}")]
+    InvalidConfig(String),
     /// A PCM sample is NaN or infinite.
     #[error("invalid PCM sample at index {index}")]
     InvalidSample {
@@ -66,6 +69,9 @@ pub enum EngineError {
     /// The caller requested cancellation.
     #[error("whisper transcription cancelled")]
     Cancelled,
+    /// The native speaker diarization engine could not initialize or process audio.
+    #[error("speaker diarization failed: {0}")]
+    Diarization(String),
     /// Engine configuration is invalid before execution starts.
     #[error("invalid whisper configuration: {0}")]
     Configuration(String),
