@@ -1,0 +1,31 @@
+name: Shuffled tests
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shuffle:
+    name: Three randomized sequential test runs
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Test three random sequential orders
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            echo "Shuffled test run $attempt/3"
+            cargo +nightly test --workspace --all-features --locked -- -Z unstable-options --shuffle --test-threads=1
+          done

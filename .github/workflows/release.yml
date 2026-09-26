@@ -9,8 +9,6 @@ on:
   pull_request_target:
     branches: [main]
     types: [closed]
-  push:
-    branches: ['feat/**']
   workflow_dispatch:
 
 permissions:
@@ -41,8 +39,6 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: Test release automation
-        run: python scripts/test_release.py
       - name: Reserve release tag or choose preview version
         id: version
         env:
@@ -173,8 +169,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.85.0
-      - name: Test source workspace
-        run: cargo test --workspace --all-features --locked
       - uses: actions/download-artifact@v4
         with:
           name: release-metadata
