@@ -36,7 +36,10 @@ impl EngineStore {
     pub fn require(&self, spec: &EngineSpec) -> Result<InstalledEngine, EngineArtifactError> {
         let install_dir = self.install_dir(spec)?;
         let executable = install_dir.join(&spec.executable_path);
-        if !executable.is_file() {
+        let executable_is_nonempty = executable
+            .metadata()
+            .is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0);
+        if !executable_is_nonempty {
             return Err(EngineArtifactError::MissingEngine {
                 version: spec.version.clone(),
                 platform: spec.platform,
