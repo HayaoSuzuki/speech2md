@@ -6,7 +6,8 @@ yasumaroのビルド、変更の検証、配布ファイルの生成、リリー
 
 ## ソースからのビルド
 
-[Rust 1.85以降](https://www.rust-lang.org/tools/install)を導入し、リポジトリのルートでreleaseバイナリをビルドします。
+[rustup](https://www.rust-lang.org/tools/install)を導入し、リポジトリのルートでreleaseバイナリをビルドします。
+`rust-toolchain.toml`に指定したRust 1.98.1を使用します。CIも同じバージョンで検証します。
 
 ```console
 cargo build --release -p yasumaro-cli --locked

@@ -211,8 +211,7 @@ fn doctor() -> Result<String, AppError> {
     let engine_store = EngineStore::new(EngineRootResolver::resolve()?);
     let engine = engines
         .select(platform)
-        .ok()
-        .is_some_and(|spec| engine_store.require(spec).is_ok());
+        .is_ok_and(|spec| engine_store.require(spec).is_ok());
     let models = ModelManifest::embedded()?;
     let model_store = ModelStore::new(ModelRootResolver::resolve()?);
     let installed = models

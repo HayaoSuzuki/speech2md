@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use yasumaro_core::{Timestamp, TranscriptDocument};
 
 const COMMONMARK_ESCAPABLE: &str = r##"!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"##;
@@ -61,11 +63,13 @@ pub fn render_commonmark(document: &TranscriptDocument) -> String {
             || "Unknown".to_owned(),
             |id| format!("Speaker {}", u64::from(id.as_u32()) + 1),
         );
-        output.push_str(&format!(
-            "\n**{speaker}**（{}）\n\n{}\n",
+        writeln!(
+            output,
+            "\n**{speaker}**（{}）\n\n{}",
             format_timestamp(utterance.span.start()),
             escape_block_text(&utterance.text)
-        ));
+        )
+        .expect("writing to a String cannot fail");
     }
 
     output
