@@ -60,3 +60,18 @@ fn list_is_local_and_verify_reports_an_actionable_missing_engine() {
         .stderr(predicate::str::contains("is not installed"))
         .stderr(predicate::str::contains("speech2md engine install"));
 }
+
+#[test]
+fn prune_is_idempotent_when_no_obsolete_engine_exists() {
+    let root = tempfile::tempdir().expect("temporary engine root");
+
+    speech2md()
+        .args(["engine", "prune"])
+        .env("SPEECH2MD_ENGINE_DIR", root.path())
+        .env("HTTPS_PROXY", "http://127.0.0.1:9")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Pruned 0 engine installation(s); kept 0 locked installation(s).",
+        ));
+}
