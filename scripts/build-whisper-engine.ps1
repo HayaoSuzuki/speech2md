@@ -13,7 +13,7 @@ $upstreamVersion = 'v1.9.4'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $patchPath = Join-Path $repositoryRoot 'vendor\whisper.cpp-patches\0001-add-prompt-file.patch'
 $resolvedOutput = [IO.Path]::GetFullPath($OutputDirectory)
-$work = Join-Path ([IO.Path]::GetTempPath()) ("speech2md-whisper-build-" + [guid]::NewGuid().ToString('N'))
+$work = Join-Path ([IO.Path]::GetTempPath()) ("yasumaro-whisper-build-" + [guid]::NewGuid().ToString('N'))
 $source = Join-Path $work 'source'
 $build = Join-Path $work 'build'
 $stage = Join-Path $work 'stage'
@@ -41,8 +41,8 @@ try {
         -DGGML_NATIVE=OFF `
         -DGGML_OPENMP=OFF `
         -DGGML_CUDA=OFF `
-        "-DCMAKE_C_FLAGS=/experimental:deterministic /Brepro /pathmap:$source=/speech2md-whisper" `
-        "-DCMAKE_CXX_FLAGS=/experimental:deterministic /Brepro /pathmap:$source=/speech2md-whisper /EHsc" `
+        "-DCMAKE_C_FLAGS=/experimental:deterministic /Brepro /pathmap:$source=/yasumaro-whisper" `
+        "-DCMAKE_CXX_FLAGS=/experimental:deterministic /Brepro /pathmap:$source=/yasumaro-whisper /EHsc" `
         -DCMAKE_EXE_LINKER_FLAGS=/Brepro `
         -DWHISPER_BUILD_TESTS=ON `
         -DWHISPER_BUILD_EXAMPLES=ON `
@@ -73,10 +73,10 @@ try {
         patch_sha256 = $patchHash
         platform = 'windows-x86_64'
         compiler = $compiler
-        cmake_options = @('BUILD_SHARED_LIBS=OFF','GGML_NATIVE=OFF','GGML_OPENMP=OFF','GGML_CUDA=OFF','CMAKE_C_FLAGS=/experimental:deterministic /Brepro /pathmap:SOURCE=/speech2md-whisper','CMAKE_CXX_FLAGS=/experimental:deterministic /Brepro /pathmap:SOURCE=/speech2md-whisper /EHsc','CMAKE_EXE_LINKER_FLAGS=/Brepro','WHISPER_BUILD_TESTS=ON','WHISPER_BUILD_EXAMPLES=ON','WHISPER_FFMPEG=OFF')
+        cmake_options = @('BUILD_SHARED_LIBS=OFF','GGML_NATIVE=OFF','GGML_OPENMP=OFF','GGML_CUDA=OFF','CMAKE_C_FLAGS=/experimental:deterministic /Brepro /pathmap:SOURCE=/yasumaro-whisper','CMAKE_CXX_FLAGS=/experimental:deterministic /Brepro /pathmap:SOURCE=/yasumaro-whisper /EHsc','CMAKE_EXE_LINKER_FLAGS=/Brepro','WHISPER_BUILD_TESTS=ON','WHISPER_BUILD_EXAMPLES=ON','WHISPER_FFMPEG=OFF')
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $stage 'build-metadata.json') -Encoding utf8NoBOM
 
-    $archive = Join-Path $resolvedOutput "speech2md-whispercpp-$upstreamVersion-windows-x86_64.zip"
+    $archive = Join-Path $resolvedOutput "yasumaro-whispercpp-$upstreamVersion-windows-x86_64.zip"
     if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
     $zip = [IO.Compression.ZipFile]::Open($archive, [IO.Compression.ZipArchiveMode]::Create)
     try {

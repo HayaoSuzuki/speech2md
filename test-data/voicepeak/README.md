@@ -56,5 +56,5 @@ SSML形式は読み方やポーズを制御したいテストで利用できま�
 CSVの構造は次のテストで検証できます。
 
 ```console
-cargo test -p speech2md-runtime --test voicepeak_sources --locked
+cargo test -p yasumaro-runtime --test voicepeak_sources --locked
 ```

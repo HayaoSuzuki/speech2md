@@ -1,13 +1,13 @@
-name = "speech2md-formal"
+name = "yasumaro-formal"
 version = "0.1.0"
-defaultTargets = ["Speech2mdTests", "testgen"]
+defaultTargets = ["YasumaroTests", "testgen"]
 
 [[lean_lib]]
-name = "Speech2md"
+name = "Yasumaro"
 
 [[lean_exe]]
-name = "Speech2mdTests"
-root = "Speech2mdTests"
+name = "YasumaroTests"
+root = "YasumaroTests"
 
 [[lean_exe]]
 name = "testgen"

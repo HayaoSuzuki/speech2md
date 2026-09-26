@@ -12,7 +12,7 @@ if { [[ $contract_only == true ]] && [[ $# -ne 1 ]]; } || { [[ $contract_only ==
 fi
 
 archive=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
-work=$(mktemp -d "${TMPDIR:-/tmp}/speech2md-whisper-verify.XXXXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/yasumaro-whisper-verify.XXXXXXXX")
 trap 'rm -rf -- "$work"' EXIT
 
 tar -tf "$archive" > "$work/entries"
@@ -30,7 +30,7 @@ exe="$work/bin/whisper-cli"
 test -f "$exe" && test ! -L "$exe"
 "$exe" --help >/dev/null 2>&1
 
-sentinel=speech2md-secret-prompt-7e18b1
+sentinel=yasumaro-secret-prompt-7e18b1
 printf %s "$sentinel" > "$work/prompt.txt"
 set +e
 output=$("$exe" --prompt-file "$work/prompt.txt" --file "$work/missing.wav" 2>&1)

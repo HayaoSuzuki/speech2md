@@ -1,5 +1,5 @@
 [package]
-name = "speech2md-fuzz"
+name = "yasumaro-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2024"
@@ -10,9 +10,9 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 pulldown-cmark = "0.13"
-speech2md-core = { path = "../crates/speech2md-core" }
-speech2md-formats = { path = "../crates/speech2md-formats" }
-speech2md-runtime = { path = "../crates/speech2md-runtime" }
+yasumaro-core = { path = "../crates/yasumaro-core" }
+yasumaro-formats = { path = "../crates/yasumaro-formats" }
+yasumaro-runtime = { path = "../crates/yasumaro-runtime" }
 tempfile = "3"
 
 [[bin]]

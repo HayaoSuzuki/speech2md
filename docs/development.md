@@ -1,6 +1,6 @@
 # 開発ガイド
 
-speech2mdのビルド、変更の検証、配布ファイルの生成、リリース手順をまとめています。
+yasumaroのビルド、変更の検証、配布ファイルの生成、リリース手順をまとめています。
 インストールと使い方は[README](../README.md)を参照してください。
 以下のコマンドはリポジトリのルートで実行します。
 
@@ -9,10 +9,10 @@ speech2mdのビルド、変更の検証、配布ファイルの生成、リリ�
 [Rust 1.85以降](https://www.rust-lang.org/tools/install)を導入し、リポジトリのルートでreleaseバイナリをビルドします。
 
 ```console
-cargo build --release -p speech2md-cli --locked
+cargo build --release -p yasumaro-cli --locked
 ```
 
-Windowsでは`target\release\speech2md.exe`、LinuxとmacOSでは`target/release/speech2md`が生成されます。
+Windowsでは`target\release\yasumaro.exe`、LinuxとmacOSでは`target/release/yasumaro`が生成されます。
 任意のディレクトリへコピーし、そのディレクトリを`PATH`へ追加してください。
 
 文字起こしにはCPU版whisper.cpp、話者分離にはsherpa-onnxを使用します。
@@ -45,22 +45,22 @@ Linux／macOSでは、対象のOSとCPU上で次のコマンドを実行しま�
 ./scripts/build-posix-cli.sh ./dist
 ```
 
-`dist/`へ`bin/speech2md`、README、ライセンス、エンジン配布情報を含むアーカイブとSHA-256ファイルを生成します。
+`dist/`へ`bin/yasumaro`、README、ライセンス、エンジン配布情報を含むアーカイブとSHA-256ファイルを生成します。
 展開後のCLIのバージョン、起動、`doctor`、エンジン配布情報を確認します。推論エンジンとモデルは含みません。
 Windowsでは`python scripts/build-cli.py dist`で`.zip`を生成できます。
 
 | 環境 | CLIアーカイブ |
 |---|---|
-| Windows x86-64 | `speech2md-v0.1.0-windows-x86_64.zip` |
-| Linux x86-64（glibc） | `speech2md-v0.1.0-linux-x86_64.tar.gz` |
-| macOS Apple Silicon | `speech2md-v0.1.0-macos-aarch64.tar.gz` |
-| macOS Intel | `speech2md-v0.1.0-macos-x86_64.tar.gz` |
+| Windows x86-64 | `yasumaro-v0.1.0-windows-x86_64.zip` |
+| Linux x86-64（glibc） | `yasumaro-v0.1.0-linux-x86_64.tar.gz` |
+| macOS Apple Silicon | `yasumaro-v0.1.0-macos-aarch64.tar.gz` |
+| macOS Intel | `yasumaro-v0.1.0-macos-x86_64.tar.gz` |
 
 例えば、Apple Silicon版は次のように展開して起動できます。
 
 ```sh
-tar -xzf dist/speech2md-v0.1.0-macos-aarch64.tar.gz
-./bin/speech2md --help
+tar -xzf dist/yasumaro-v0.1.0-macos-aarch64.tar.gz
+./bin/yasumaro --help
 ```
 
 ## マージ時の自動リリース
@@ -85,7 +85,7 @@ PRの作成・更新と手動実行では、同じビルド処理を公開なし
 
 ## 設計資料
 
-- [設計仕様](superpowers/specs/2026-09-25-speech2md-design.md)
-- [実装計画](superpowers/plans/2026-09-25-speech2md-implementation.md)
+- [設計仕様](superpowers/specs/2026-09-25-yasumaro-design.md)
+- [実装計画](superpowers/plans/2026-09-25-yasumaro-implementation.md)
 - [Leanによる話者割り当てモデル](../formal/README.md)
 - [whisper.cppエンジンのビルド](../engines/README.md)

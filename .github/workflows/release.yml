@@ -48,7 +48,7 @@ jobs:
           if [[ "$PUBLISH" == true ]]; then
             tag=$(python scripts/release.py tag --commit "$COMMIT")
           else
-            base=$(python -c 'import tomllib; print(tomllib.load(open("crates/speech2md-cli/Cargo.toml", "rb"))["package"]["version"])')
+            base=$(python -c 'import tomllib; print(tomllib.load(open("crates/yasumaro-cli/Cargo.toml", "rb"))["package"]["version"])')
             tag="v${base}-preview.${GITHUB_RUN_ID}"
           fi
           {
@@ -103,10 +103,10 @@ jobs:
       - name: Verify Windows engine including inference and cancellation
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/verify-whisper-engine.ps1 -Archive dist/speech2md-whispercpp-v1.9.4-windows-x86_64.zip -Model target/engine-test/ggml-base.bin -Fixture crates/speech2md-runtime/tests/fixtures/tone.wav
+        run: ./scripts/verify-whisper-engine.ps1 -Archive dist/yasumaro-whispercpp-v1.9.4-windows-x86_64.zip -Model target/engine-test/ggml-base.bin -Fixture crates/yasumaro-runtime/tests/fixtures/tone.wav
       - name: Verify POSIX engine including inference and cancellation
         if: runner.os != 'Windows'
-        run: ./scripts/verify-whisper-engine.sh "dist/speech2md-whispercpp-v1.9.4-${{ matrix.platform }}.tar.gz" target/engine-test/ggml-base.bin crates/speech2md-runtime/tests/fixtures/tone.wav
+        run: ./scripts/verify-whisper-engine.sh "dist/yasumaro-whispercpp-v1.9.4-${{ matrix.platform }}.tar.gz" target/engine-test/ggml-base.bin crates/yasumaro-runtime/tests/fixtures/tone.wav
       - uses: actions/upload-artifact@v4
         with:
           name: engine-${{ matrix.platform }}
@@ -235,7 +235,7 @@ jobs:
               exit 0
             fi
           else
-            gh release create "$TAG" --verify-tag --draft --title "speech2md $TAG" --generate-notes
+            gh release create "$TAG" --verify-tag --draft --title "yasumaro $TAG" --generate-notes
           fi
           gh release upload "$TAG" dist/* --clobber
           gh release edit "$TAG" --draft=false

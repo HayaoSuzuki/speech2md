@@ -1,6 +1,7 @@
-# speech2md
+# yasumaro
 
-speech2mdは、日本語の会議音声をローカルで文字起こしし、話者と時刻を含むCommonMark文書を生成するCLIです。
+yasumaroは、日本語の会議音声をローカルで文字起こしし、話者と時刻を含むCommonMark文書を生成するCLIです。
+名前は、『古事記』の編纂者・太安万侶に由来します。
 
 ## 対象環境
 
@@ -19,44 +20,57 @@ FFmpegは必要ありません。
 
 ## インストール
 
-[GitHub Releases](https://github.com/HayaoSuzuki/speech2md/releases/latest)のAssetsから、使用するOSとCPUに合うCLIアーカイブをダウンロードしてください。
+[GitHub Releases](https://github.com/HayaoSuzuki/yasumaro/releases/latest)のAssetsから、使用するOSとCPUに合うCLIアーカイブをダウンロードしてください。
 RustやPythonのインストールは不要です。
 
 ファイル名の`<version>`は、`v0.1.0`のようなReleaseのバージョンに置き換えてください。
 
 | 環境 | CLIアーカイブ |
 |---|---|
-| Windows x86-64 | `speech2md-<version>-windows-x86_64.zip` |
-| Linux x86-64（glibc） | `speech2md-<version>-linux-x86_64.tar.gz` |
-| macOS Apple Silicon | `speech2md-<version>-macos-aarch64.tar.gz` |
-| macOS Intel | `speech2md-<version>-macos-x86_64.tar.gz` |
+| Windows x86-64 | `yasumaro-<version>-windows-x86_64.zip` |
+| Linux x86-64（glibc） | `yasumaro-<version>-linux-x86_64.tar.gz` |
+| macOS Apple Silicon | `yasumaro-<version>-macos-aarch64.tar.gz` |
+| macOS Intel | `yasumaro-<version>-macos-x86_64.tar.gz` |
 
 アーカイブを任意のディレクトリへ展開し、中にある`bin`ディレクトリを`PATH`へ追加します。
-Windowsの実行ファイルは`bin\speech2md.exe`、LinuxとmacOSは`bin/speech2md`です。
+Windowsの実行ファイルは`bin\yasumaro.exe`、LinuxとmacOSは`bin/yasumaro`です。
 
-例えば、macOS Apple Silicon版の`v0.1.0`をダウンロードした場合は、保存先で次のように展開して起動できます。
+例えば、macOS Apple Silicon版をダウンロードした場合は、保存先で次のように展開して起動できます。
 
 ```sh
-tar -xzf speech2md-v0.1.0-macos-aarch64.tar.gz
-./bin/speech2md --help
+tar -xzf yasumaro-*-macos-aarch64.tar.gz
+./bin/yasumaro --help
 ```
 
 `PATH`へ追加した後は、どのディレクトリからでも次のコマンドで起動を確認できます。
 
 ```console
-speech2md --version
+yasumaro --version
 ```
 
 推論エンジンとモデルはCLIアーカイブに含まれません。続けて初回セットアップを行ってください。
+
+## speech2mdからの移行
+
+コマンド名を`yasumaro`へ変更しました。既存のスクリプトやショートカットも変更してください。
+環境変数は`YASUMARO_ENGINE_DIR`と`YASUMARO_MODEL_DIR`を使用します。
+旧名の`SPEECH2MD_ENGINE_DIR`と`SPEECH2MD_MODEL_DIR`は参照しません。
+`RUST_LOG`でモジュールを指定する場合も、`yasumaro_runtime`や`yasumaro_cli`へ変更してください。
+
+既定の保存先も`speech2md`から`yasumaro`へ変わります。旧保存先のデータは自動で移動・削除しません。
+導入済みモデルを再利用する場合は、`YASUMARO_MODEL_DIR`に旧モデルディレクトリの絶対パスを指定できます。
+エンジンは`yasumaro engine install`で導入し直してください。
+
+過去のReleaseには旧名の配布ファイルが残ります。`yasumaro-`で始まるCLIアーカイブを使用してください。
 
 ## 初回セットアップ
 
 推論エンジンとモデルは、文字起こしを始める前に明示的に導入します。
 
 ```console
-speech2md engine install
-speech2md model install
-speech2md doctor
+yasumaro engine install
+yasumaro model install
+yasumaro doctor
 ```
 
 `engine install`はGitHub Releases、`model install`はモデルの配布元へ接続します。
@@ -66,9 +80,9 @@ speech2md doctor
 導入状態は次のコマンドで確認できます。
 
 ```console
-speech2md engine list
-speech2md engine verify
-speech2md model list
+yasumaro engine list
+yasumaro engine verify
+yasumaro model list
 ```
 
 ## 基本操作
@@ -76,16 +90,16 @@ speech2md model list
 出力先を省略すると、入力ファイルと同じ場所に同名の`.md`ファイルを書き込みます。
 
 ```console
-speech2md transcribe meeting.m4a
-speech2md transcribe meeting.wav --speakers 3 --prompt "Rust, Kubernetes, PostgreSQL"
-speech2md transcribe meeting.mp3 --whisper small --output minutes.md
+yasumaro transcribe meeting.m4a
+yasumaro transcribe meeting.wav --speakers 3 --prompt "Rust, Kubernetes, PostgreSQL"
+yasumaro transcribe meeting.mp3 --whisper small --output minutes.md
 ```
 
 既存ファイルは上書きしません。
 置き換える場合だけ`--force`を付けます。
 
 ```console
-speech2md transcribe meeting.wav --output minutes.md --force
+yasumaro transcribe meeting.wav --output minutes.md --force
 ```
 
 ## 話者数
@@ -94,7 +108,7 @@ speech2md transcribe meeting.wav --output minutes.md --force
 話者数を省略すると自動推定し、人数が分かっている場合は`--speakers`で正の整数を指定します。
 
 ```console
-speech2md transcribe meeting.wav --speakers 4
+yasumaro transcribe meeting.wav --speakers 4
 ```
 
 `Speaker 1`などの番号は一つの録音内だけで有効です。
@@ -106,9 +120,9 @@ speech2md transcribe meeting.wav --speakers 4
 `small`は保存容量と処理時間が増える代わりに、精度が改善する場合があります。
 
 ```console
-speech2md transcribe meeting.wav --whisper small
-speech2md transcribe meeting.wav --prompt "Rust, Kubernetes, PostgreSQL"
-speech2md transcribe meeting.wav --prompt-file prompt.txt
+yasumaro transcribe meeting.wav --whisper small
+yasumaro transcribe meeting.wav --prompt "Rust, Kubernetes, PostgreSQL"
+yasumaro transcribe meeting.wav --prompt-file prompt.txt
 ```
 
 長いプロンプトや機密性のある用語集には、UTF-8の`--prompt-file`を使用してください。
@@ -132,7 +146,7 @@ API側の変更は完了しています。
 
 ## LLMによる後処理
 
-speech2mdは、音声のまま外部サービスへ渡す代わりに、ローカルで文字起こししたCommonMarkを作ります。
+yasumaroは、音声のまま外部サービスへ渡す代わりに、ローカルで文字起こししたCommonMarkを作ります。
 これにより、後段のLLMへ渡すデータをテキストに限定できます。
 実際のトークン数は使用するLLMとトークナイザーによって異なります。
 
@@ -151,12 +165,12 @@ speech2mdは、音声のまま外部サービスへ渡す代わりに、ロー�
 
 | OS | エンジン | モデル |
 |---|---|---|
-| Windows | `%LOCALAPPDATA%\speech2md\data\engines` | `%LOCALAPPDATA%\speech2md\data\models` |
-| macOS | `~/Library/Application Support/speech2md/engines` | `~/Library/Application Support/speech2md/models` |
-| Linux | `$XDG_DATA_HOME/speech2md/engines` | `$XDG_DATA_HOME/speech2md/models` |
+| Windows | `%LOCALAPPDATA%\yasumaro\data\engines` | `%LOCALAPPDATA%\yasumaro\data\models` |
+| macOS | `~/Library/Application Support/yasumaro/engines` | `~/Library/Application Support/yasumaro/models` |
+| Linux | `$XDG_DATA_HOME/yasumaro/engines` | `$XDG_DATA_HOME/yasumaro/models` |
 
-Linuxで`XDG_DATA_HOME`が未設定の場合は`~/.local/share/speech2md`以下を使用します。
-絶対パスの`SPEECH2MD_ENGINE_DIR`と`SPEECH2MD_MODEL_DIR`で保存先を変更できます。
+Linuxで`XDG_DATA_HOME`が未設定の場合は`~/.local/share/yasumaro`以下を使用します。
+絶対パスの`YASUMARO_ENGINE_DIR`と`YASUMARO_MODEL_DIR`で保存先を変更できます。
 
 ## モデルの容量とライセンス
 
@@ -164,7 +178,7 @@ Linuxで`XDG_DATA_HOME`が未設定の場合は`~/.local/share/speech2md`以下�
 `whisper-small`は使用する場合だけ個別に導入します。
 
 ```console
-speech2md model install whisper-small
+yasumaro model install whisper-small
 ```
 
 | モデル | 用途 | ダウンロードサイズ | ライセンス |
@@ -199,19 +213,19 @@ speech2md model install whisper-small
 最初に診断結果を確認します。
 
 ```console
-speech2md doctor
+yasumaro doctor
 ```
 
-`engine: not installed`の場合は`speech2md engine install`、モデルが不足している場合は`speech2md model install`を実行します。
+`engine: not installed`の場合は`yasumaro engine install`、モデルが不足している場合は`yasumaro model install`を実行します。
 出力先が存在するエラーでは、既存ファイルを確認してから必要な場合だけ`--force`を指定します。
 無効な`RUST_LOG`を設定している場合は、値を修正するか環境変数を削除します。
 
 詳細ログは標準エラーへ出力され、CommonMarkには混ざりません。
 
 ```powershell
-$env:RUST_LOG = "speech2md_runtime=debug,speech2md_cli=info"
-speech2md doctor
+$env:RUST_LOG = "yasumaro_runtime=debug,yasumaro_cli=info"
+yasumaro doctor
 Remove-Item Env:RUST_LOG
 ```
 
-開発に参加する場合は[開発ガイド](https://github.com/HayaoSuzuki/speech2md/blob/main/docs/development.md)を参照してください。
+開発に参加する場合は[開発ガイド](https://github.com/HayaoSuzuki/yasumaro/blob/main/docs/development.md)を参照してください。

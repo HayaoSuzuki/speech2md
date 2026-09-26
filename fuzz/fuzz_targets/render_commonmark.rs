@@ -2,8 +2,8 @@
 
 use libfuzzer_sys::fuzz_target;
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag};
-use speech2md_core::{SpeakerId, TimeSpan, Timestamp, TranscriptDocument, Utterance};
-use speech2md_formats::render_commonmark;
+use yasumaro_core::{SpeakerId, TimeSpan, Timestamp, TranscriptDocument, Utterance};
+use yasumaro_formats::render_commonmark;
 
 fuzz_target!(|data: &[u8]| {
     let midpoint = data.len() / 2;

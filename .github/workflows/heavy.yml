@@ -26,11 +26,11 @@ jobs:
       - name: Build patched whisper.cpp
         run: ./scripts/build-whisper-engine.sh dist
       - name: Verify archive contract
-        run: ./scripts/verify-whisper-engine.sh --contract-only dist/speech2md-whispercpp-v1.9.4-linux-x86_64.tar.gz
+        run: ./scripts/verify-whisper-engine.sh --contract-only dist/yasumaro-whispercpp-v1.9.4-linux-x86_64.tar.gz
       - uses: actions/upload-artifact@v4
         with:
-          name: speech2md-whispercpp-v1.9.4-linux-x86_64
-          path: dist/speech2md-whispercpp-v1.9.4-linux-x86_64.tar.gz
+          name: yasumaro-whispercpp-v1.9.4-linux-x86_64
+          path: dist/yasumaro-whispercpp-v1.9.4-linux-x86_64.tar.gz
           if-no-files-found: error
           retention-days: 7
 

@@ -1,6 +1,6 @@
 # whisper.cpp engine artifacts
 
-speech2md ships no engine binary in the repository. Release artifacts are built from
+yasumaro ships no engine binary in the repository. Release artifacts are built from
 whisper.cpp `v1.9.4` commit `927cfce34f31707e17f2bff35c349632fb9e2c3a` plus the
 patch in `vendor/whisper.cpp-patches/`.
 
@@ -8,12 +8,12 @@ Build on the target operating system:
 
 ```powershell
 .\scripts\build-whisper-engine.ps1 -OutputDirectory .\dist
-.\scripts\verify-whisper-engine.ps1 -Archive .\dist\speech2md-whispercpp-v1.9.4-windows-x86_64.zip -ContractOnly
+.\scripts\verify-whisper-engine.ps1 -Archive .\dist\yasumaro-whispercpp-v1.9.4-windows-x86_64.zip -ContractOnly
 ```
 
 ```sh
 ./scripts/build-whisper-engine.sh ./dist
-./scripts/verify-whisper-engine.sh --contract-only ./dist/speech2md-whispercpp-v1.9.4-linux-x86_64.tar.gz
+./scripts/verify-whisper-engine.sh --contract-only ./dist/yasumaro-whispercpp-v1.9.4-linux-x86_64.tar.gz
 ```
 
 The shell script selects `linux-x86_64`, `macos-aarch64`, or `macos-x86_64`
@@ -32,6 +32,10 @@ that tag so engine installations from different releases remain separate.
 PR and manual runs build preview artifacts without publishing. Their generated
 manifest URLs are not installable release URLs. The checked-in manifest remains
 unchanged; published release CLIs use the generated manifest instead.
+The checked-in manifest still references a published `speech2md` engine archive:
+only its repository URL changes to `HayaoSuzuki/yasumaro`. Its tag, file name, size,
+and SHA-256 must continue to match the existing release. Newly built archives and
+generated manifests use the `yasumaro` name.
 
 `--contract-only` checks archive shape, executable startup, and prompt handling without
 a model. It is suitable for build jobs, but not release approval. Before publishing,
@@ -47,7 +51,7 @@ Manual engine release procedure (for source builds):
 3. Measure its byte size and lowercase SHA-256 after upload/download.
 4. Add only real published artifacts to `manifest.json`, using an HTTPS GitHub
    Releases URL and `bin/whisper-cli` (`.exe` on Windows) as `executable_path`.
-5. Run the normal CI suite and `speech2md engine install`, `verify`, and `prune`.
+5. Run the normal CI suite and `yasumaro engine install`, `verify`, and `prune`.
 
 Missing platforms intentionally remain absent from the manifest. The CLI reports
 `MissingArtifact`; placeholder URLs or hashes are never used.

@@ -1,9 +1,9 @@
 [workspace]
 members = [
-  "crates/speech2md-core",
-  "crates/speech2md-formats",
-  "crates/speech2md-runtime",
-  "crates/speech2md-cli",
+  "crates/yasumaro-core",
+  "crates/yasumaro-formats",
+  "crates/yasumaro-runtime",
+  "crates/yasumaro-cli",
 ]
 resolver = "3"
 

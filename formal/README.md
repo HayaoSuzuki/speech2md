@@ -1,6 +1,6 @@
 # Leanによる話者割り当てモデルの検証
 
-このディレクトリは、speech2mdの純粋な話者割り当て規則をLean 4でモデル化する技術検証です。
+このディレクトリは、yasumaroの純粋な話者割り当て規則をLean 4でモデル化する技術検証です。
 音声デコード、Whisper、sherpa-onnx、ファイルシステムなどのI/Oは対象に含めません。
 
 ## Windowsでの準備
@@ -26,7 +26,7 @@ lake --version
 ```powershell
 cd formal
 lake build
-lake exe Speech2mdTests
+lake exe YasumaroTests
 ```
 
 現在、Leanで次の性質を検査しています。
@@ -56,7 +56,7 @@ Rust側の契約fixtureを更新する場合は、リポジトリルートから
 
 ```powershell
 Push-Location formal
-lake exe testgen | Set-Content -Encoding utf8 ..\crates\speech2md-core\tests\fixtures\lean-speaker-assignment.json
+lake exe testgen | Set-Content -Encoding utf8 ..\crates\yasumaro-core\tests\fixtures\lean-speaker-assignment.json
 Pop-Location
 ```
 
