@@ -27,7 +27,7 @@ jobs:
         run: ./scripts/build-whisper-engine.sh dist
       - name: Verify archive contract
         run: ./scripts/verify-whisper-engine.sh --contract-only dist/yasumaro-whispercpp-v1.9.4-linux-x86_64.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: yasumaro-whispercpp-v1.9.4-linux-x86_64
           path: dist/yasumaro-whispercpp-v1.9.4-linux-x86_64.tar.gz
