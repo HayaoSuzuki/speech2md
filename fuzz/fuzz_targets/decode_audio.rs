@@ -1,7 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use speech2md_runtime::decode_to_pcm;
+use yasumaro_runtime::decode_to_pcm;
 
 fuzz_target!(|data: &[u8]| {
     if data.is_empty() {

@@ -1740,75 +1740,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "speech2md-cli"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "clap",
- "ctrlc",
- "predicates",
- "pulldown-cmark",
- "speech2md-runtime",
- "tempfile",
- "thiserror",
- "tracing",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
-name = "speech2md-core"
-version = "0.1.0"
-dependencies = [
- "proptest",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
-name = "speech2md-formats"
-version = "0.1.0"
-dependencies = [
- "proptest",
- "pulldown-cmark",
- "speech2md-core",
-]
-
-[[package]]
-name = "speech2md-runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "ctrlc",
- "directories",
- "filetime",
- "flate2",
- "fs4",
- "hound",
- "memmap2",
- "proptest",
- "reqwest",
- "rubato",
- "send_ctrlc",
- "serde",
- "serde_json",
- "sha2",
- "sherpa-onnx",
- "speech2md-core",
- "speech2md-formats",
- "symphonia",
- "tar",
- "tempfile",
- "thiserror",
- "tracing",
- "tracing-subscriber",
- "url",
- "wait-timeout",
- "zip",
-]
-
-[[package]]
 name = "strength_reduce"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2528,6 +2459,75 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "388c44dc09d76f1536602ead6d325eb532f5c122f17782bd57fb47baeeb767e2"
 dependencies = [
  "lzma-sys",
+]
+
+[[package]]
+name = "yasumaro-cli"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "clap",
+ "ctrlc",
+ "predicates",
+ "pulldown-cmark",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "yasumaro-runtime",
+]
+
+[[package]]
+name = "yasumaro-core"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "yasumaro-formats"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "pulldown-cmark",
+ "yasumaro-core",
+]
+
+[[package]]
+name = "yasumaro-runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "ctrlc",
+ "directories",
+ "filetime",
+ "flate2",
+ "fs4",
+ "hound",
+ "memmap2",
+ "proptest",
+ "reqwest",
+ "rubato",
+ "send_ctrlc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sherpa-onnx",
+ "symphonia",
+ "tar",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "wait-timeout",
+ "yasumaro-core",
+ "yasumaro-formats",
+ "zip",
 ]
 
 [[package]]

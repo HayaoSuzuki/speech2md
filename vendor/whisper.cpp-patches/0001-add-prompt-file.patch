@@ -135,7 +135,7 @@ index 0000000..f6871eb
 +set(work "${CMAKE_CURRENT_BINARY_DIR}/prompt-file-contract")
 +file(MAKE_DIRECTORY "${work}")
 +set(prompt "${work}/prompt.txt")
-+set(sentinel "speech2md-secret-prompt-7e18b1")
++set(sentinel "yasumaro-secret-prompt-7e18b1")
 +file(WRITE "${prompt}" "${sentinel}")
 +
 +execute_process(

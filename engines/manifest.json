@@ -3,7 +3,7 @@
     {
       "version": "whispercpp-v1.9.4-speech2md.1",
       "platform": "windows-x86_64",
-      "url": "https://github.com/HayaoSuzuki/speech2md/releases/download/whispercpp-v1.9.4-speech2md.1/speech2md-whispercpp-v1.9.4-windows-x86_64.zip",
+      "url": "https://github.com/HayaoSuzuki/yasumaro/releases/download/whispercpp-v1.9.4-speech2md.1/speech2md-whispercpp-v1.9.4-windows-x86_64.zip",
       "size": 863314,
       "sha256": "c7d7b2eb2506910666b81bddd77ac35a7ad3b3c9eba648526085dcf8629f9862",
       "archive_name": "speech2md-whispercpp-v1.9.4-windows-x86_64.zip",

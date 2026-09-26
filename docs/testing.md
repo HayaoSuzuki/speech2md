@@ -6,9 +6,9 @@ VOICEPEAKで作成する自作音声による話者分離テストは、[VOICEPE
 生成した10本のWAVに対し、Whisperを使わず話者分離だけを連続評価できます。
 
 ```powershell
-$env:SPEECH2MD_VOICEPEAK_DIR = (Resolve-Path "samples\voicepeak")
-cargo test -p speech2md-runtime --test voicepeak_eval --locked -- --ignored --nocapture
-Remove-Item Env:SPEECH2MD_VOICEPEAK_DIR
+$env:YASUMARO_VOICEPEAK_DIR = (Resolve-Path "samples\voicepeak")
+cargo test -p yasumaro-runtime --test voicepeak_eval --locked -- --ignored --nocapture
+Remove-Item Env:YASUMARO_VOICEPEAK_DIR
 ```
 
 テストはケースごとの検出話者数、クラスタごとの発話時間、処理時間、実時間係数を1個のJSONとして標準出力へ書きます。
@@ -21,11 +21,11 @@ Remove-Item Env:SPEECH2MD_VOICEPEAK_DIR
 次の例はWindowsの既定保存先を使用します。
 
 ```powershell
-$env:SPEECH2MD_ENGINE_DIR = (Resolve-Path (Join-Path $env:LOCALAPPDATA "speech2md\data\engines"))
-$env:SPEECH2MD_MODEL_DIR = (Resolve-Path (Join-Path $env:LOCALAPPDATA "speech2md\data\models"))
-$env:SPEECH2MD_DIARIZATION_FIXTURE = (Resolve-Path "samples\voicepeak\balanced-4speakers.wav")
-cargo test -p speech2md-cli --test real_cli --locked -- --ignored --nocapture
-Remove-Item Env:SPEECH2MD_ENGINE_DIR, Env:SPEECH2MD_MODEL_DIR, Env:SPEECH2MD_DIARIZATION_FIXTURE
+$env:YASUMARO_ENGINE_DIR = (Resolve-Path (Join-Path $env:LOCALAPPDATA "yasumaro\data\engines"))
+$env:YASUMARO_MODEL_DIR = (Resolve-Path (Join-Path $env:LOCALAPPDATA "yasumaro\data\models"))
+$env:YASUMARO_DIARIZATION_FIXTURE = (Resolve-Path "samples\voicepeak\balanced-4speakers.wav")
+cargo test -p yasumaro-cli --test real_cli --locked -- --ignored --nocapture
+Remove-Item Env:YASUMARO_ENGINE_DIR, Env:YASUMARO_MODEL_DIR, Env:YASUMARO_DIARIZATION_FIXTURE
 ```
 
 このテストは文字起こしの成功、2個以上かつ指定数以下の話者ラベル、時刻順、非空本文、CommonMark構造を検査します。
@@ -56,7 +56,7 @@ cargo +nightly fuzz run assign_speakers
 
 Windowsで`STATUS_DLL_NOT_FOUND`が発生する場合は、Visual StudioのMSVC x64ディレクトリにある`clang_rt.asan_dynamic-x86_64.dll`を`PATH`から参照できるDeveloper PowerShellで実行します。
 
-`speech2md-core`と`speech2md-formats`は、行と関数のカバレッジを100%に保ちます。
+`yasumaro-core`と`yasumaro-formats`は、行と関数のカバレッジを100%に保ちます。
 runtimeとCLIでは、ネイティブエンジン、OSエラー、プロセス終了タイミングなどの外部境界を実装内テストだけで網羅できないため、fake engine、ignored実モデルテスト、外部評価を併用します。
 
 ## Fuzzing
@@ -68,7 +68,7 @@ runtimeとCLIでは、ネイティブエンジン、OSエラー、プロセス�
 rustup toolchain install nightly
 cargo +stable install cargo-fuzz --version 0.13.2 --locked
 cargo +nightly fuzz check
-cargo +nightly fuzz run decode_audio fuzz/corpus/decode_audio crates/speech2md-runtime/tests/fixtures -- -max_total_time=60 -max_len=1048576
+cargo +nightly fuzz run decode_audio fuzz/corpus/decode_audio crates/yasumaro-runtime/tests/fixtures -- -max_total_time=60 -max_len=1048576
 cargo +nightly fuzz run render_commonmark -- -max_total_time=60 -max_len=65536
 ```
 
@@ -164,14 +164,14 @@ test-data/srv-db/
 エンジンと既定モデルを導入してから、絶対パスを環境変数へ設定します。
 
 ```powershell
-speech2md engine install
-speech2md model install
+yasumaro engine install
+yasumaro model install
 $env:SRV_DB_DIR = (Resolve-Path "test-data\srv-db")
-cargo test -p speech2md-runtime --test srv_db --locked -- --ignored --nocapture
+cargo test -p yasumaro-runtime --test srv_db --locked -- --ignored --nocapture
 Remove-Item Env:SRV_DB_DIR
 ```
 
-`SPEECH2MD_ENGINE_DIR`と`SPEECH2MD_MODEL_DIR`で既定以外の保存先を使用している場合は、その絶対パスも設定します。
+`YASUMARO_ENGINE_DIR`と`YASUMARO_MODEL_DIR`で既定以外の保存先を使用している場合は、その絶対パスも設定します。
 `SRV_DB_DIR`が未設定の場合、テストは`status`が`skipped`のJSONを出力し、モデルやネットワークへアクセスしません。
 
 ## 指標
@@ -198,8 +198,8 @@ SRV-DBには時間付きの話者正解区間がないため、DERは算出し�
 
 ```powershell
 New-Item -ItemType Directory -Force test-data\srv-db-results | Out-Null
-speech2md transcribe test-data\performance\meeting-1h.wav --whisper base --output test-data\srv-db-results\meeting-1h.md
-speech2md transcribe test-data\performance\meeting-3h.wav --whisper base --output test-data\srv-db-results\meeting-3h.md
+yasumaro transcribe test-data\performance\meeting-1h.wav --whisper base --output test-data\srv-db-results\meeting-1h.md
+yasumaro transcribe test-data\performance\meeting-3h.wav --whisper base --output test-data\srv-db-results\meeting-3h.md
 ```
 
 CPU名、論理CPU数、音声時間、処理時間、実時間係数、Peak Working Set、一時ディスクの最大使用量を記録します。

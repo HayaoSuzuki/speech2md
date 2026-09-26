@@ -1356,61 +1356,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "speech2md-core"
-version = "0.1.0"
-dependencies = [
- "thiserror",
-]
-
-[[package]]
-name = "speech2md-formats"
-version = "0.1.0"
-dependencies = [
- "speech2md-core",
-]
-
-[[package]]
-name = "speech2md-fuzz"
-version = "0.0.0"
-dependencies = [
- "libfuzzer-sys",
- "pulldown-cmark",
- "speech2md-core",
- "speech2md-formats",
- "speech2md-runtime",
- "tempfile",
-]
-
-[[package]]
-name = "speech2md-runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "directories",
- "flate2",
- "fs4",
- "hound",
- "memmap2",
- "reqwest",
- "rubato",
- "send_ctrlc",
- "serde",
- "serde_json",
- "sha2",
- "sherpa-onnx",
- "speech2md-core",
- "speech2md-formats",
- "symphonia",
- "tar",
- "tempfile",
- "thiserror",
- "tracing",
- "url",
- "wait-timeout",
- "zip",
-]
-
-[[package]]
 name = "strength_reduce"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2061,6 +2006,61 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "388c44dc09d76f1536602ead6d325eb532f5c122f17782bd57fb47baeeb767e2"
 dependencies = [
  "lzma-sys",
+]
+
+[[package]]
+name = "yasumaro-core"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "yasumaro-formats"
+version = "0.1.0"
+dependencies = [
+ "yasumaro-core",
+]
+
+[[package]]
+name = "yasumaro-fuzz"
+version = "0.0.0"
+dependencies = [
+ "libfuzzer-sys",
+ "pulldown-cmark",
+ "tempfile",
+ "yasumaro-core",
+ "yasumaro-formats",
+ "yasumaro-runtime",
+]
+
+[[package]]
+name = "yasumaro-runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "directories",
+ "flate2",
+ "fs4",
+ "hound",
+ "memmap2",
+ "reqwest",
+ "rubato",
+ "send_ctrlc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sherpa-onnx",
+ "symphonia",
+ "tar",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "url",
+ "wait-timeout",
+ "yasumaro-core",
+ "yasumaro-formats",
+ "zip",
 ]
 
 [[package]]

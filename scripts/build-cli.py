@@ -31,15 +31,15 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     metadata = json.loads(subprocess.check_output(
         ['cargo', 'metadata', '--no-deps', '--format-version', '1', '--locked'], cwd=root))
-    version = next(p['version'] for p in metadata['packages'] if p['name'] == 'speech2md-cli')
-    subprocess.run(['cargo', 'build', '--release', '-p', 'speech2md-cli', '--locked', '--target', target], cwd=root, check=True)
+    version = next(p['version'] for p in metadata['packages'] if p['name'] == 'yasumaro-cli')
+    subprocess.run(['cargo', 'build', '--release', '-p', 'yasumaro-cli', '--locked', '--target', target], cwd=root, check=True)
     windows = host[0] == 'Windows'
-    executable = 'speech2md.exe' if windows else 'speech2md'
+    executable = 'yasumaro.exe' if windows else 'yasumaro'
     binary = Path(metadata['target_directory']) / target / 'release' / executable
     files = [(binary, f'bin/{executable}', 0o755)]
     files += [(root / relative, relative, 0o644) for relative in
               ('LICENSE', 'README.md', 'engines/README.md', 'engines/manifest.json')]
-    archive = output / (f'speech2md-v{version}-{name}.' + ('zip' if windows else 'tar.gz'))
+    archive = output / (f'yasumaro-v{version}-{name}.' + ('zip' if windows else 'tar.gz'))
     if windows:
         with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as package:
             for source, relative, mode in files:
@@ -60,7 +60,7 @@ def main():
                         with source.open('rb') as data:
                             package.addfile(info, data)
     # Run the extracted executable so packaging mistakes fail before upload.
-    with tempfile.TemporaryDirectory(prefix='speech2md-cli-verify-') as tmp:
+    with tempfile.TemporaryDirectory(prefix='yasumaro-cli-verify-') as tmp:
         if windows:
             with zipfile.ZipFile(archive) as package:
                 package.extractall(tmp)
@@ -69,7 +69,7 @@ def main():
                 package.extractall(tmp, filter='data')
         exe = str(Path(tmp) / 'bin' / executable)
         reported = subprocess.check_output([exe, '--version'], text=True).strip()
-        if reported != f'speech2md {version}':
+        if reported != f'yasumaro {version}':
             raise RuntimeError(f'unexpected CLI version: {reported}')
         print(reported)
         subprocess.run([exe, '--help'], check=True, stdout=subprocess.DEVNULL)

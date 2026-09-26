@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $archivePath = (Resolve-Path -LiteralPath $Archive).Path
-$work = Join-Path ([IO.Path]::GetTempPath()) ("speech2md-whisper-verify-" + [guid]::NewGuid().ToString('N'))
+$work = Join-Path ([IO.Path]::GetTempPath()) ("yasumaro-whisper-verify-" + [guid]::NewGuid().ToString('N'))
 $oldNoProxy = [Environment]::GetEnvironmentVariable('NO_PROXY', 'Process')
 $oldNoProxyLower = [Environment]::GetEnvironmentVariable('no_proxy', 'Process')
 $proxyNames = @('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy')
@@ -46,7 +46,7 @@ try {
     & $exe --help 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'whisper-cli --help failed' }
 
-    $sentinel = 'speech2md-secret-prompt-7e18b1'
+    $sentinel = 'yasumaro-secret-prompt-7e18b1'
     $prompt = Join-Path $work 'prompt.txt'
     Set-Content -LiteralPath $prompt -Value $sentinel -Encoding utf8NoBOM -NoNewline
     $missing = Join-Path $work 'missing.wav'

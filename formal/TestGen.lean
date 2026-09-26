@@ -1,4 +1,4 @@
-import Speech2md.TestVectors
+import Yasumaro.TestVectors
 
 def main : IO Unit :=
-  IO.println Speech2md.testVectorsJson
+  IO.println Yasumaro.testVectorsJson

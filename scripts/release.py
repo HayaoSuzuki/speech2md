@@ -52,12 +52,12 @@ def engine_manifest(directory, repository, tag):
     artifacts = []
     for platform in PLATFORMS:
         windows = platform == 'windows-x86_64'
-        name = f'speech2md-whispercpp-v1.9.4-{platform}.' + ('zip' if windows else 'tar.gz')
+        name = f'yasumaro-whispercpp-v1.9.4-{platform}.' + ('zip' if windows else 'tar.gz')
         path = Path(directory) / name
         data = path.read_bytes()
         if not data:
             raise ValueError(f'empty engine archive: {name}')
-        artifacts.append(dict(version=f'whispercpp-v1.9.4-speech2md.{tag}', platform=platform,
+        artifacts.append(dict(version=f'whispercpp-v1.9.4-yasumaro.{tag}', platform=platform,
                               url=f'https://github.com/{repository}/releases/download/{tag}/{name}',
                               size=len(data), sha256=hashlib.sha256(data).hexdigest(),
                               archive_name=name, executable_path='bin/whisper-cli' + ('.exe' if windows else '')))
@@ -68,8 +68,8 @@ def set_version(root, version):
     if not VERSION.fullmatch(version):
         raise ValueError('invalid release version')
     for relative, pattern in (
-        ('crates/speech2md-cli/Cargo.toml', r'(?m)^(version\s*=\s*")[^"]+("\s*)$'),
-        ('Cargo.lock', r'(\[\[package\]\]\nname = "speech2md-cli"\nversion = ")[^"]+("\n)'),
+        ('crates/yasumaro-cli/Cargo.toml', r'(?m)^(version\s*=\s*")[^"]+("\s*)$'),
+        ('Cargo.lock', r'(\[\[package\]\]\nname = "yasumaro-cli"\nversion = ")[^"]+("\n)'),
     ):
         path = Path(root) / relative
         contents, count = re.subn(pattern, lambda m: m[1] + version + m[2], path.read_text())
@@ -93,7 +93,7 @@ def main():
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     if args.command == 'tag':
-        base = tomllib.loads((root / 'crates/speech2md-cli/Cargo.toml').read_text())['package']['version']
+        base = tomllib.loads((root / 'crates/yasumaro-cli/Cargo.toml').read_text())['package']['version']
         print(reserve_tag(root, args.commit, base))
     elif args.command == 'manifest':
         result = engine_manifest(args.directory, args.repository, args.tag)

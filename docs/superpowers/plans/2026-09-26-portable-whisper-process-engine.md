@@ -4,11 +4,11 @@
 
 **Goal:** Windows、macOS、Linuxで、検証済みの `whisper-cli` を明示的に導入し、日本語音声を外部プロセスで文字起こしできるようにする。
 
-**Architecture:** `speech2md-runtime` にエンジン成果物の取得と検証、WAV生成、プロセス制御、JSON変換を分離して置く。`Transcriber` はOSや `whisper.cpp` の型を公開せず、CLIはエンジン管理だけをランタイムへ委譲する。
+**Architecture:** `yasumaro-runtime` にエンジン成果物の取得と検証、WAV生成、プロセス制御、JSON変換を分離して置く。`Transcriber` はOSや `whisper.cpp` の型を公開せず、CLIはエンジン管理だけをランタイムへ委譲する。
 
 **Tech Stack:** Rust 2024、Rust 1.85、serde、serde_json、reqwest blocking、sha2、zip、flate2、tar、fs4、hound、send_ctrlc 0.6.0、wait-timeout、proptest、cargo-fuzz。
 
-**Spec:** `docs/superpowers/specs/2026-09-25-speech2md-design.md`
+**Spec:** `docs/superpowers/specs/2026-09-25-yasumaro-design.md`
 
 ## Global Constraints
 
@@ -38,12 +38,12 @@
 
 **Files:**
 - Create: `engines/manifest.json`
-- Create: `crates/speech2md-runtime/src/engine_artifact/mod.rs`
-- Create: `crates/speech2md-runtime/src/engine_artifact/manifest.rs`
-- Create: `crates/speech2md-runtime/src/engine_artifact/platform.rs`
-- Modify: `crates/speech2md-runtime/src/lib.rs`
-- Test: `crates/speech2md-runtime/src/engine_artifact/manifest.rs`
-- Test: `crates/speech2md-runtime/src/engine_artifact/platform.rs`
+- Create: `crates/yasumaro-runtime/src/engine_artifact/mod.rs`
+- Create: `crates/yasumaro-runtime/src/engine_artifact/manifest.rs`
+- Create: `crates/yasumaro-runtime/src/engine_artifact/platform.rs`
+- Modify: `crates/yasumaro-runtime/src/lib.rs`
+- Test: `crates/yasumaro-runtime/src/engine_artifact/manifest.rs`
+- Test: `crates/yasumaro-runtime/src/engine_artifact/platform.rs`
 
 **Interfaces:**
 - Consumes: 埋め込みJSON、またはテスト用の `Vec<EngineSpec>`、`std::env::consts::{OS, ARCH}` 相当の文字列。
@@ -55,7 +55,7 @@
 
 - [ ] **Step 2: 失敗を確認する**
 
-Run: `cargo test -p speech2md-runtime engine_artifact`
+Run: `cargo test -p yasumaro-runtime engine_artifact`
 Expected: FAIL with unresolved `EngineManifest` and `Platform`.
 
 - [ ] **Step 3: 値型と検証を実装する**
@@ -70,25 +70,25 @@ Task 6で成果物を作るまで `engines/manifest.json` は `artifacts: []` �
 
 - [ ] **Step 5: テストを通す**
 
-Run: `cargo test -p speech2md-runtime engine_artifact`
+Run: `cargo test -p yasumaro-runtime engine_artifact`
 Expected: PASS.
 
 - [ ] **Step 6: コミットする**
 
 ```bash
-git add engines crates/speech2md-runtime
+git add engines crates/yasumaro-runtime
 git commit -m "feat: resolve portable whisper engine artifacts"
 ```
 
 ### Task 2: エンジンの安全な取得、展開、保存
 
 **Files:**
-- Create: `crates/speech2md-runtime/src/engine_artifact/store.rs`
-- Create: `crates/speech2md-runtime/src/engine_artifact/install.rs`
-- Create: `crates/speech2md-runtime/src/engine_artifact/archive.rs`
-- Modify: `crates/speech2md-runtime/src/engine_artifact/mod.rs`
-- Modify: `crates/speech2md-runtime/Cargo.toml`
-- Test: `crates/speech2md-runtime/tests/engine_store.rs`
+- Create: `crates/yasumaro-runtime/src/engine_artifact/store.rs`
+- Create: `crates/yasumaro-runtime/src/engine_artifact/install.rs`
+- Create: `crates/yasumaro-runtime/src/engine_artifact/archive.rs`
+- Modify: `crates/yasumaro-runtime/src/engine_artifact/mod.rs`
+- Modify: `crates/yasumaro-runtime/Cargo.toml`
+- Test: `crates/yasumaro-runtime/tests/engine_store.rs`
 
 **Interfaces:**
 - Consumes: `EngineSpec`、明示した保存ルート、`EngineArchiveSource::download(&self, spec: &EngineSpec, destination: &mut dyn Write) -> Result<(), EngineArtifactError>`。
@@ -110,12 +110,12 @@ git commit -m "feat: resolve portable whisper engine artifacts"
 
 - [ ] **Step 4: 失敗を確認する**
 
-Run: `cargo test -p speech2md-runtime --test engine_store`
+Run: `cargo test -p yasumaro-runtime --test engine_store`
 Expected: FAIL with unresolved store and installer APIs.
 
 - [ ] **Step 5: 保存、検証、展開を実装する**
 
-`EngineRootResolver::resolve()` は `SPEECH2MD_ENGINE_DIR` の絶対パスを優先し、未指定時はプラットフォームのデータディレクトリ配下の `engines` を返す。
+`EngineRootResolver::resolve()` は `YASUMARO_ENGINE_DIR` の絶対パスを優先し、未指定時はプラットフォームのデータディレクトリ配下の `engines` を返す。
 本番の `HttpEngineArchiveSource` だけが `reqwest::blocking::Client` を所有し、テストではReaderを返すfake sourceを使う。
 取得は既存のモデルinstallerと同じtimeout、64 KiB buffer、`sync_all`、rename規則を使う。
 ZIPとtar.gzの各entryは正規化前後に検査し、通常ファイルとディレクトリ以外を拒否する。
@@ -123,27 +123,27 @@ ZIPとtar.gzの各entryは正規化前後に検査し、通常ファイルとデ
 
 - [ ] **Step 6: テストを通す**
 
-Run: `cargo test -p speech2md-runtime --test engine_store`
+Run: `cargo test -p yasumaro-runtime --test engine_store`
 Expected: PASS without network.
 
 - [ ] **Step 7: コミットする**
 
 ```bash
-git add crates/speech2md-runtime Cargo.lock
+git add crates/yasumaro-runtime Cargo.lock
 git commit -m "feat: install and verify whisper engines"
 ```
 
 ### Task 3: Whisper JSON変換とWAVステージング
 
 **Files:**
-- Rewrite: `crates/speech2md-runtime/src/engine/whisper.rs`
-- Create: `crates/speech2md-runtime/src/engine/whisper_json.rs`
-- Create: `crates/speech2md-runtime/src/engine/whisper_wav.rs`
-- Modify: `crates/speech2md-runtime/src/engine/mod.rs`
-- Modify: `crates/speech2md-runtime/Cargo.toml`
-- Test: `crates/speech2md-runtime/src/engine/whisper_json.rs`
-- Test: `crates/speech2md-runtime/src/engine/whisper_wav.rs`
-- Create: `crates/speech2md-runtime/tests/fixtures/whisper-output.json`
+- Rewrite: `crates/yasumaro-runtime/src/engine/whisper.rs`
+- Create: `crates/yasumaro-runtime/src/engine/whisper_json.rs`
+- Create: `crates/yasumaro-runtime/src/engine/whisper_wav.rs`
+- Modify: `crates/yasumaro-runtime/src/engine/mod.rs`
+- Modify: `crates/yasumaro-runtime/Cargo.toml`
+- Test: `crates/yasumaro-runtime/src/engine/whisper_json.rs`
+- Test: `crates/yasumaro-runtime/src/engine/whisper_wav.rs`
+- Create: `crates/yasumaro-runtime/tests/fixtures/whisper-output.json`
 - Modify: `fuzz/Cargo.toml`
 - Create: `fuzz/fuzz_targets/whisper_json.rs`
 
@@ -167,7 +167,7 @@ git commit -m "feat: install and verify whisper engines"
 
 - [ ] **Step 4: 失敗を確認する**
 
-Run: `cargo test -p speech2md-runtime engine::whisper`
+Run: `cargo test -p yasumaro-runtime engine::whisper`
 Expected: FAIL with unresolved parser and WAV APIs.
 
 - [ ] **Step 5: JSON変換とWAV生成を実装する**
@@ -183,26 +183,26 @@ Expected: PASS without running an unbounded fuzz session.
 
 - [ ] **Step 7: 通常テストを通す**
 
-Run: `cargo test -p speech2md-runtime engine::whisper`
+Run: `cargo test -p yasumaro-runtime engine::whisper`
 Expected: PASS.
 
 - [ ] **Step 8: コミットする**
 
 ```bash
-git add crates/speech2md-runtime fuzz Cargo.lock
+git add crates/yasumaro-runtime fuzz Cargo.lock
 git commit -m "feat: stage whisper input and parse JSON"
 ```
 
 ### Task 4: 外部プロセス文字起こしとキャンセル
 
 **Files:**
-- Create: `crates/speech2md-runtime/src/engine/process.rs`
-- Modify: `crates/speech2md-runtime/src/engine/whisper.rs`
-- Modify: `crates/speech2md-runtime/src/engine/mod.rs`
-- Modify: `crates/speech2md-runtime/Cargo.toml`
-- Test: `crates/speech2md-runtime/tests/whisper_process.rs`
-- Rewrite: `crates/speech2md-runtime/tests/whisper_model.rs`
-- Create: `crates/speech2md-runtime/src/bin/fake_whisper.rs`
+- Create: `crates/yasumaro-runtime/src/engine/process.rs`
+- Modify: `crates/yasumaro-runtime/src/engine/whisper.rs`
+- Modify: `crates/yasumaro-runtime/src/engine/mod.rs`
+- Modify: `crates/yasumaro-runtime/Cargo.toml`
+- Test: `crates/yasumaro-runtime/tests/whisper_process.rs`
+- Rewrite: `crates/yasumaro-runtime/tests/whisper_model.rs`
+- Create: `crates/yasumaro-runtime/src/bin/fake_whisper.rs`
 
 **Interfaces:**
 - Consumes: `EngineLease`、Whisperモデルパス、16 kHz mono PCM、`TranscriptionRequest { prompt, threads, cancelled }`。
@@ -233,7 +233,7 @@ sentinelを含むprompt本文がargv、環境変数、保持診断へ現れず�
 
 - [ ] **Step 5: 失敗を確認する**
 
-Run: `cargo test -p speech2md-runtime --features test-support --test whisper_process`
+Run: `cargo test -p yasumaro-runtime --features test-support --test whisper_process`
 Expected: FAIL with unresolved process transcriber.
 
 - [ ] **Step 6: bounded captureとprocess runnerを実装する**
@@ -252,36 +252,36 @@ stdoutとstderrは別threadで読み続ける固定長tail bufferへ渡し、pip
 
 - [ ] **Step 8: ignored実モデルテストを更新する**
 
-`SPEECH2MD_ENGINE_DIR` と `SPEECH2MD_MODEL_DIR` が設定され、自作の `japanese-short.wav` がある場合だけ実行する。
+`YASUMARO_ENGINE_DIR` と `YASUMARO_MODEL_DIR` が設定され、自作の `japanese-short.wav` がある場合だけ実行する。
 区間順、非空本文、日本語設定を確認し、取得処理は呼び出さない。
 
 - [ ] **Step 9: テストを通す**
 
-Run: `cargo test -p speech2md-runtime --features test-support --test whisper_process`
+Run: `cargo test -p yasumaro-runtime --features test-support --test whisper_process`
 Expected: PASS without engine, model, or network.
 
-Run: `cargo test -p speech2md-runtime`
+Run: `cargo test -p yasumaro-runtime`
 Expected: PASS.
 
 - [ ] **Step 10: コミットする**
 
 ```bash
-git add crates/speech2md-runtime Cargo.lock
+git add crates/yasumaro-runtime Cargo.lock
 git commit -m "feat: transcribe with managed whisper process"
 ```
 
 ### Task 5: エンジン管理CLI
 
 **Files:**
-- Create: `crates/speech2md-cli/src/args.rs`
-- Create: `crates/speech2md-cli/src/commands.rs`
-- Modify: `crates/speech2md-cli/src/main.rs`
-- Modify: `crates/speech2md-cli/Cargo.toml`
-- Test: `crates/speech2md-cli/tests/engine_cli.rs`
+- Create: `crates/yasumaro-cli/src/args.rs`
+- Create: `crates/yasumaro-cli/src/commands.rs`
+- Modify: `crates/yasumaro-cli/src/main.rs`
+- Modify: `crates/yasumaro-cli/Cargo.toml`
+- Test: `crates/yasumaro-cli/tests/engine_cli.rs`
 
 **Interfaces:**
 - Consumes: Task 1と2のmanifest、store、installer、prune API。
-- Produces: `speech2md engine install`、`engine list`、`engine verify`、`engine prune` と安定した終了コード。
+- Produces: `yasumaro engine install`、`engine list`、`engine verify`、`engine prune` と安定した終了コード。
 
 - [ ] **Step 1: assert_cmdによるCLIテストを書く**
 
@@ -290,7 +290,7 @@ git commit -m "feat: transcribe with managed whisper process"
 
 - [ ] **Step 2: 失敗を確認する**
 
-Run: `cargo test -p speech2md-cli --test engine_cli`
+Run: `cargo test -p yasumaro-cli --test engine_cli`
 Expected: FAIL because engine subcommands are absent.
 
 - [ ] **Step 3: clap引数とdispatchを実装する**
@@ -301,13 +301,13 @@ installerは `Install` 分岐だけで生成し、ほかの分岐へHTTP client�
 
 - [ ] **Step 4: テストとhelpを通す**
 
-Run: `cargo test -p speech2md-cli --test engine_cli`
+Run: `cargo test -p yasumaro-cli --test engine_cli`
 Expected: PASS.
 
 - [ ] **Step 5: コミットする**
 
 ```bash
-git add crates/speech2md-cli Cargo.lock
+git add crates/yasumaro-cli Cargo.lock
 git commit -m "feat: manage portable whisper engines"
 ```
 
@@ -377,8 +377,8 @@ git commit -m "build: package portable whisper engines"
 ### Task 7: 親計画との統合
 
 **Files:**
-- Modify: `docs/superpowers/plans/2026-09-25-speech2md-implementation.md`
-- Modify: `.superpowers/sdd/2026-09-25-speech2md-implementation/progress.md`
+- Modify: `docs/superpowers/plans/2026-09-25-yasumaro-implementation.md`
+- Modify: `.superpowers/sdd/2026-09-25-yasumaro-implementation/progress.md`
 
 **Interfaces:**
 - Consumes: Task 1〜6の公開APIと完了コミット。
@@ -395,12 +395,12 @@ CIとREADMEは4対象成果物とLinux-only GitHub-hosted CIを参照する。
 
 - [ ] **Step 3: 計画の残存矛盾を検査する**
 
-Run: `rg -n "whisper-rs|abort callback|Rustプロセス内" docs/superpowers/plans/2026-09-25-speech2md-implementation.md`
+Run: `rg -n "whisper-rs|abort callback|Rustプロセス内" docs/superpowers/plans/2026-09-25-yasumaro-implementation.md`
 Expected: no matches.
 
 - [ ] **Step 4: コミットする**
 
 ```bash
-git add docs/superpowers/plans/2026-09-25-speech2md-implementation.md
+git add docs/superpowers/plans/2026-09-25-yasumaro-implementation.md
 git commit -m "docs: align implementation plan with whisper process"
 ```

@@ -1,7 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use speech2md_core::{
+use yasumaro_core::{
     AssignmentConfig, SpeakerId, SpeakerTurn, TimeSpan, TimedToken, Timestamp, TranscribedSegment,
     assign_speakers,
 };
