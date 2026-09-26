@@ -1,17 +1,11 @@
 # speech2md
 
 speech2mdは、日本語の会議音声をローカルで文字起こしし、話者と時刻を含むCommonMark文書を生成するCLIです。
-文字起こしにはCPU版whisper.cpp、話者分離にはsherpa-onnxを使用します。
 
 ## 対象環境
 
-Windows x86-64、Linux x86-64（glibc）、macOS（Apple Silicon／Intel）向けにビルドできます。
+Windows x86-64、Linux x86-64（glibc）、macOS（Apple Silicon／Intel）に対応しています。
 GPUは使用せず、CPUだけで処理します。
-OSとCPUごとに異なる実行ファイルを生成するため、POSIX環境共通の単一バイナリではありません。
-
-Release用CLIには、同じReleaseで公開する全OSのエンジン配布情報を埋め込みます。
-各OSで`engine install`を実行すると、そのOSとCPUに合うエンジンを取得できます。
-リポジトリ内の`engines/manifest.json`は既存のWindows版を参照します。ソースから直接ビルドする場合のエンジン登録手順は[`engines/README.md`](engines/README.md)を参照してください。
 
 ## 対応する入力と出力
 
@@ -25,59 +19,35 @@ FFmpegは必要ありません。
 
 ## インストール
 
-[Rust 1.85以降](https://www.rust-lang.org/tools/install)を導入し、リポジトリのルートでreleaseバイナリをビルドします。
+[GitHub Releases](https://github.com/HayaoSuzuki/speech2md/releases/latest)のAssetsから、使用するOSとCPUに合うCLIアーカイブをダウンロードしてください。
+RustやPythonのインストールは不要です。
 
-```console
-cargo build --release -p speech2md-cli --locked
-```
-
-Windowsでは`target\release\speech2md.exe`、LinuxとmacOSでは`target/release/speech2md`が生成されます。
-任意のディレクトリへコピーし、そのディレクトリを`PATH`へ追加してください。
-
-### Linux／macOS向け配布ファイルの生成
-
-対象のOSとCPU上で次のコマンドを実行します。Rustに加えてPython 3.12以降が必要です。
-
-```sh
-./scripts/build-posix-cli.sh ./dist
-```
-
-`dist/`へ`bin/speech2md`、README、ライセンス、エンジン配布情報を含むアーカイブとSHA-256ファイルを生成します。
-展開後のCLIのバージョン、起動、`doctor`、エンジン配布情報を確認します。推論エンジンとモデルは含みません。
-Windowsでは`python scripts/build-cli.py dist`で`.zip`を生成できます。
+ファイル名の`<version>`は、`v0.1.0`のようなReleaseのバージョンに置き換えてください。
 
 | 環境 | CLIアーカイブ |
 |---|---|
-| Linux x86-64（glibc） | `speech2md-v0.1.0-linux-x86_64.tar.gz` |
-| macOS Apple Silicon | `speech2md-v0.1.0-macos-aarch64.tar.gz` |
-| macOS Intel | `speech2md-v0.1.0-macos-x86_64.tar.gz` |
+| Windows x86-64 | `speech2md-<version>-windows-x86_64.zip` |
+| Linux x86-64（glibc） | `speech2md-<version>-linux-x86_64.tar.gz` |
+| macOS Apple Silicon | `speech2md-<version>-macos-aarch64.tar.gz` |
+| macOS Intel | `speech2md-<version>-macos-x86_64.tar.gz` |
 
-例えば、Apple Silicon版は次のように展開して起動できます。
+アーカイブを任意のディレクトリへ展開し、中にある`bin`ディレクトリを`PATH`へ追加します。
+Windowsの実行ファイルは`bin\speech2md.exe`、LinuxとmacOSは`bin/speech2md`です。
+
+例えば、macOS Apple Silicon版の`v0.1.0`をダウンロードした場合は、保存先で次のように展開して起動できます。
 
 ```sh
-tar -xzf dist/speech2md-v0.1.0-macos-aarch64.tar.gz
+tar -xzf speech2md-v0.1.0-macos-aarch64.tar.gz
 ./bin/speech2md --help
 ```
 
-### マージ時の自動リリース
+`PATH`へ追加した後は、どのディレクトリからでも次のコマンドで起動を確認できます。
 
-`main`へのPRをマージすると、GitHub Actionsの`Build and release`ワークフローが次の処理を実行します。
+```console
+speech2md --version
+```
 
-1. マージコミットへ`vMAJOR.MINOR.PATCH`タグを付けます。既存の`v`タグの最大バージョンからパッチ番号を1増やします。初回はCLIの`Cargo.toml`のバージョンを使います。
-2. Windows x86-64、Linux x86-64、macOS Apple Silicon／Intelのエンジンをビルドし、実モデルで推論とキャンセルを検証します。
-3. 各エンジンのサイズ、SHA-256、ReleaseのURLからマニフェストを生成します。
-4. タグと同じバージョンおよび生成したマニフェストを各OSのCLIへ埋め込み、ビルド・展開後の起動を検証します。
-5. 全構成が成功した場合に、CLIとエンジンの計8アーカイブ、マニフェスト、チェックサムをGitHub Releaseへ登録して公開します。
-
-ソースのバージョンとマニフェストの変更はビルド環境内で行い、`main`への書き戻しはありません。
-失敗した実行はGitHub Actionsから再実行できます。同じコミットではタグを再利用し、公開済みReleaseのファイルは置き換えません。
-マージせずに閉じたPRでは、タグもReleaseも作りません。
-品質検査、workspaceテスト、シャッフルテスト、カバレッジ、リリーススクリプトのテストはPR側のCIで実行し、マージ後のリリースでは繰り返しません。配布物の起動・実推論・チェックサム検証はリリース時にも実行します。
-ワークフローの分担は[`docs/testing.md`](docs/testing.md#github-actionsの構成)を参照してください。
-
-PRの作成・更新と手動実行では、同じビルド処理を公開なしで検証します。ブランチへのpush自体では起動しないため、PR更新とpushによる二重実行はありません。
-プレビュー成果物は実行結果のArtifactsから取得でき、14日間保存します。
-プレビューのエンジンURLは未公開のため、`engine install`で利用する場合はマージ後のRelease版CLIを使用してください。
+推論エンジンとモデルはCLIアーカイブに含まれません。続けて初回セットアップを行ってください。
 
 ## 初回セットアップ
 
@@ -204,22 +174,17 @@ speech2md model install whisper-small
 | `speaker-segmentation` | 話者区間検出 | 6 MB | MIT |
 | `speaker-embedding` | 話者特徴量 | 40 MB | Apache-2.0 |
 
-サイズは埋め込みマニフェストのバイト数を10進MBへ丸めた値です。
+サイズは10進MBでの概算です。
 導入中は部分ファイルと完成ファイルが一時的に併存するため、表の合計より多い空き容量を確保してください。
 
-## 速度と精度
+## 処理時間と空き容量
 
 処理時間はCPU、音声時間、モデル、話者数、話速によって変わります。
 通常の対象は最大1時間、追加用途の上限は3時間ですが、処理時間の保証値ではありません。
+長時間音声の処理時間とピークメモリは未測定です。
 
-| 測定環境 | 音声時間 | Whisper | 処理時間 | 実時間係数 | ピークメモリ | 一時ディスク |
-|---|---:|---|---:|---:|---:|---:|
-| AMD Ryzen 7 PRO 7840U、16論理CPU | 1時間 | base | 未測定 | 未測定 | 未測定 | 約346 MB以上 |
-| AMD Ryzen 7 PRO 7840U、16論理CPU | 3時間 | base | 未測定 | 未測定 | 未測定 | 約1.04 GB以上 |
-
-一時ディスクの値は16 kHz、mono、`float32` PCMと16-bit WAVの理論上の合計で、ファイルシステムなどの余白を含みません。
-実測値は実モデルと評価音声を準備した後に記録します。
-評価方法は[`docs/testing.md`](docs/testing.md)を参照してください。
+変換中の一時ファイルには、1時間の音声で約346 MB以上、3時間で約1.04 GB以上の空き容量が必要です。
+これは音声変換に必要なファイルサイズの理論値です。入力音声、出力文書、エンジン、モデルの保存容量は別途確保してください。
 
 ## 制約
 
@@ -227,7 +192,7 @@ speech2md model install whisper-small
 - 話者名は推定せず、録音内の番号だけを割り当てます。
 - 話者が重なって発話する区間では、話者割り当てが不安定になる場合があります。
 - 要約、言い換え、フィラー除去、推測による誤認識修正は行いません。
-- 変換中は正規化PCMとwhisper.cpp用WAVを一時ディレクトリへ保存します。正常終了時と処理失敗時に削除します。
+- 変換中は一時ファイルを作成し、正常終了時と処理失敗時に削除します。
 
 ## トラブルシューティング
 
@@ -249,44 +214,4 @@ speech2md doctor
 Remove-Item Env:RUST_LOG
 ```
 
-## SRV-DBによる評価
-
-話速別の外部評価には、電気通信大学 高橋弘太研究室の[話速バリエーション型音声データベース（SRV-DB）](https://www.it.cei.uec.ac.jp/SRV-DB/)を使用します。
-利用時は公式ページの条件を確認し、音声、原稿、推論本文をこのリポジトリへコミットしません。
-データセット4と5の配置、CERなどの指標、実行方法は[`docs/testing.md`](docs/testing.md)に記載しています。
-
-## 開発資料
-
-- [設計仕様](docs/superpowers/specs/2026-09-25-speech2md-design.md)
-- [実装計画](docs/superpowers/plans/2026-09-25-speech2md-implementation.md)
-- [Leanによる話者割り当てモデル](formal/README.md)
-- [whisper.cppエンジンのビルド](engines/README.md)
-
-## コミット前チェック
-
-コミット前チェックには[prek](https://github.com/j178/prek)を使用します。
-
-```powershell
-uv tool install prek
-prek install
-prek run --all-files
-```
-
-フックはRust関連ファイルの変更時に`cargo fmt`、厳格な`cargo clippy`、workspaceテストを実行します。
-
-## Fuzzing
-
-[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz)で音声デコーダー境界、CommonMarkレンダラー、Whisper JSON解析、話者割り当てを検査します。
-通常のpre-commitとGitHub Actionsには含めません。
-
-```console
-rustup toolchain install nightly
-cargo +stable install cargo-fuzz --version 0.13.2 --locked
-cargo +nightly fuzz check
-cargo +nightly fuzz run decode_audio fuzz/corpus/decode_audio crates/speech2md-runtime/tests/fixtures -- -max_total_time=60 -max_len=1048576
-cargo +nightly fuzz run render_commonmark -- -max_total_time=60 -max_len=65536
-```
-
-WindowsではVisual StudioのMSVC C++ x64/x86ビルドツール、C++ AddressSanitizer、Windows 11 SDKが必要です。
-「x64 Native Tools Command Prompt」で`where link`を実行し、使用するVisual Studioの`Hostx64\x64`以下にあるリンカーが先頭に表示されることを確認してください。
-クラッシュ入力は`fuzz/artifacts/`へ保存され、Gitの管理対象には含まれません。
+開発に参加する場合は[開発ガイド](https://github.com/HayaoSuzuki/speech2md/blob/main/docs/development.md)を参照してください。
