@@ -112,6 +112,17 @@ speech2md transcribe meeting.wav --prompt-file prompt.txt
 API側の変更は完了しています。
 ```
 
+## LLMによる後処理
+
+speech2mdは、音声のまま外部サービスへ渡す代わりに、ローカルで文字起こししたCommonMarkを作ります。
+これにより、後段のLLMへ渡すデータをテキストに限定できます。
+実際のトークン数は使用するLLMとトークナイザーによって異なります。
+
+話者ラベルは後処理の手掛かりであり、人物の同定や正確な話者数を保証するものではありません。
+自作の評価音声では、10ケース中7ケースで期待話者数と検出話者数が一致しました。
+話者数が一致しない場合も本文は出力し、LLMまたは利用者が話者名、見出し、要約、フィラーを整える運用を想定しています。
+機密情報を外部のLLMへ渡すかどうかは、社内ルールと利用するサービスのデータ取り扱い条件に従って判断してください。
+
 ## オフライン処理と保存場所
 
 音声デコード、文字起こし、話者分離、CommonMark生成はすべてローカルで行います。
@@ -217,7 +228,7 @@ prek run --all-files
 
 ## Fuzzing
 
-[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz)で音声デコーダー境界とCommonMarkレンダラーを検査します。
+[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz)で音声デコーダー境界、CommonMarkレンダラー、Whisper JSON解析、話者割り当てを検査します。
 通常のpre-commitとGitHub Actionsには含めません。
 
 ```console
