@@ -3,6 +3,7 @@
 /target/
 /dist/
 /test-data/srv-db/
+/samples/*.wav
 *.part
 /fuzz/artifacts/
 /fuzz/corpus/

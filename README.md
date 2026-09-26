@@ -38,6 +38,31 @@ speech2md engine prune
 WindowsではVisual StudioのC++ x64ビルドツールとCMake、macOSではXcode Command Line ToolsとCMake、LinuxではC++コンパイラとCMakeが必要です。
 ローカル検証では任意で手元のモデルと短いWAVを渡せますが、モデルや音声は成果物にもリポジトリにも含めません。
 
+## ローカル音声による話者分離テスト
+
+実モデルを使う話者分離テストは重いため、通常のテストとGitHub Actionsでは実行しません。
+話者分離モデルを置いたディレクトリと、4話者を収録したローカルWAVを環境変数で指定して手動実行します。
+
+```powershell
+$env:SPEECH2MD_MODEL_DIR = "C:\path\to\models"
+$env:SPEECH2MD_DIARIZATION_FIXTURE = (Resolve-Path "samples\manjyu_kowai.wav")
+cargo test -p speech2md-runtime --test diarization_model -- --ignored --nocapture
+
+Remove-Item Env:SPEECH2MD_MODEL_DIR
+Remove-Item Env:SPEECH2MD_DIARIZATION_FIXTURE
+```
+
+`SPEECH2MD_MODEL_DIR`には次のファイルが必要です。
+
+- `segmentation-3-0.onnx`
+- `3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx`
+
+テストはネットワークへ接続せず、検出された話者IDが4種類あること、各発話区間が正の長さであること、開始時刻順に並ぶことを確認します。
+どちらかの環境変数が未設定の場合は、ローカル資産がない環境として処理を省略します。
+
+ローカル評価には、VOICEPEAK 6ナレーターで自作した「まんじゅうこわい」の会話音声を使用しています。
+[VOICEPEAKの利用許諾](https://www.ah-soft.com/voice/6nare/eula.html)に配慮し、生成音声そのものは配布せず、`samples/*.wav`をGitの管理対象から除外しています。
+
 ## コミット前チェック
 
 コミット前の軽量チェックには[prek](https://github.com/j178/prek)を使用します。
