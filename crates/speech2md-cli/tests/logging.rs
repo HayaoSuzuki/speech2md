@@ -6,14 +6,16 @@ fn speech2md() -> Command {
 
 #[test]
 fn accepts_a_valid_rust_log_filter() {
+    let root = tempfile::tempdir().expect("temporary engine root");
     let output = speech2md()
         .args(["engine", "list"])
+        .env("SPEECH2MD_ENGINE_DIR", root.path())
         .env("RUST_LOG", "speech2md_cli=debug")
         .output()
         .expect("run speech2md");
 
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("No engine artifacts"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("windows-x86_64"));
     assert!(String::from_utf8_lossy(&output.stderr).contains("logging initialized"));
 }
 

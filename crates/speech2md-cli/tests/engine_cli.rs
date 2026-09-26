@@ -26,18 +26,20 @@ fn usage_errors_exit_with_code_two() {
 }
 
 #[test]
-fn install_reports_an_unpublished_artifact_without_network_access() {
+fn install_reports_a_network_failure_without_leaving_the_test_root() {
+    let root = tempfile::tempdir().expect("temporary engine root");
     speech2md()
         .args(["engine", "install"])
+        .env("SPEECH2MD_ENGINE_DIR", root.path())
         .env("HTTPS_PROXY", "http://127.0.0.1:9")
         .assert()
         .code(4)
-        .stderr(predicate::str::contains("error:"))
-        .stderr(predicate::str::contains("help:"));
+        .stderr(predicate::str::contains("engine download failed"))
+        .stderr(predicate::str::contains("check the network connection"));
 }
 
 #[test]
-fn list_is_local_and_verify_reports_an_actionable_missing_artifact() {
+fn list_is_local_and_verify_reports_an_actionable_missing_engine() {
     let root = tempfile::tempdir().expect("temporary engine root");
     speech2md()
         .args(["engine", "list"])
@@ -45,7 +47,9 @@ fn list_is_local_and_verify_reports_an_actionable_missing_artifact() {
         .env("HTTPS_PROXY", "http://127.0.0.1:9")
         .assert()
         .success()
-        .stdout(predicate::str::contains("No engine artifacts"));
+        .stdout(predicate::str::contains(
+            "windows-x86_64 whispercpp-v1.9.4-speech2md.1: not installed",
+        ));
 
     speech2md()
         .args(["engine", "verify"])
@@ -53,6 +57,6 @@ fn list_is_local_and_verify_reports_an_actionable_missing_artifact() {
         .env("HTTPS_PROXY", "http://127.0.0.1:9")
         .assert()
         .code(4)
-        .stderr(predicate::str::contains("error:"))
-        .stderr(predicate::str::contains("help:"));
+        .stderr(predicate::str::contains("is not installed"))
+        .stderr(predicate::str::contains("speech2md engine install"));
 }

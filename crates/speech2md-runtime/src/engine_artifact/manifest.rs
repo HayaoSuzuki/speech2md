@@ -128,6 +128,8 @@ impl EngineManifest {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use url::Url;
 
     use super::{EngineManifest, EngineSpec};
@@ -229,9 +231,18 @@ mod tests {
     }
 
     #[test]
-    fn embedded_manifest_is_empty_until_artifacts_are_published() {
-        let manifest = EngineManifest::embedded().expect("empty embedded manifest is valid");
-        assert!(manifest.specs().is_empty());
-        assert!(manifest.select(Platform::WindowsX86_64).is_err());
+    fn embedded_manifest_selects_the_published_windows_engine() {
+        let manifest = EngineManifest::embedded().expect("embedded manifest is valid");
+        let selected = manifest
+            .select(Platform::WindowsX86_64)
+            .expect("Windows artifact is published");
+
+        assert_eq!(selected.version, "whispercpp-v1.9.4-speech2md.1");
+        assert_eq!(selected.size, 863_314);
+        assert_eq!(
+            selected.sha256,
+            "c7d7b2eb2506910666b81bddd77ac35a7ad3b3c9eba648526085dcf8629f9862"
+        );
+        assert_eq!(selected.executable_path, Path::new("bin/whisper-cli.exe"));
     }
 }
