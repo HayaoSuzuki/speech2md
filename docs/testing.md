@@ -1,5 +1,7 @@
 # テストと外部評価
 
+VOICEPEAKで作成する自作音声による話者分離テストは、[VOICEPEAK話者分離テスト原稿](../test-data/voicepeak/README.md)を参照してください。
+
 ## 通常のテスト
 
 モデルとネットワークを使わないテストは、Windowsのローカル環境とLinuxのGitHub Actionsで実行します。
