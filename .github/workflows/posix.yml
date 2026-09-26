@@ -1,0 +1,51 @@
+name: POSIX binaries
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main, 'feat/**']
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: posix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-22.04
+          - platform: macos-aarch64
+            runner: macos-14
+          - platform: macos-x86_64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.85.0
+      - name: Test workspace on the target OS
+        run: cargo test --workspace --all-features --locked
+      - name: Build and smoke-test CLI archive
+        run: ./scripts/build-posix-cli.sh dist
+      - name: Build CPU whisper.cpp engine
+        run: ./scripts/build-whisper-engine.sh dist
+      - name: Verify engine archive contract
+        run: ./scripts/verify-whisper-engine.sh --contract-only "dist/speech2md-whispercpp-v1.9.4-${{ matrix.platform }}.tar.gz"
+      - name: Upload CLI and engine archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech2md-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14

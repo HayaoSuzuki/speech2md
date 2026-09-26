@@ -5,10 +5,12 @@ speech2mdは、日本語の会議音声をローカルで文字起こしし、�
 
 ## 対象環境
 
-主な対象は64ビット版Windowsです。
+Windows x86-64、Linux x86-64（glibc）、macOS（Apple Silicon／Intel）向けにビルドできます。
 GPUは使用せず、CPUだけで処理します。
-RustコードはWindows、macOS、Linuxに対応する設計ですが、現時点でダウンロード可能なwhisper.cppエンジン成果物はWindows x86-64版だけです。
-macOSとLinuxの成果物は[`engines/README.md`](engines/README.md)の手順でビルドしてから公開する必要があります。
+OSとCPUごとに異なる実行ファイルを生成するため、POSIX環境共通の単一バイナリではありません。
+
+現時点で`engine install`からダウンロードできるwhisper.cppエンジンはWindows x86-64版だけです。
+LinuxとmacOSで文字起こしを利用するには、[`engines/README.md`](engines/README.md)の手順でエンジンをビルド・検証・公開し、`engines/manifest.json`へ登録してからCLIを再ビルドする必要があります。
 
 ## 対応する入力と出力
 
@@ -28,8 +30,36 @@ FFmpegは必要ありません。
 cargo build --release -p speech2md-cli --locked
 ```
 
-Windowsでは`target\release\speech2md.exe`が生成されます。
+Windowsでは`target\release\speech2md.exe`、LinuxとmacOSでは`target/release/speech2md`が生成されます。
 任意のディレクトリへコピーし、そのディレクトリを`PATH`へ追加してください。
+
+### Linux／macOS向け配布ファイルの生成
+
+対象のOSとCPU上で次のコマンドを実行します。Rustに加えてPython 3が必要です。
+
+```sh
+./scripts/build-posix-cli.sh ./dist
+```
+
+`dist/`へ`bin/speech2md`、README、ライセンスを含むアーカイブとSHA-256ファイルを生成します。
+ビルド時にCLIの起動と`doctor`を確認します。推論エンジンとモデルは含みません。
+
+| 環境 | CLIアーカイブ |
+|---|---|
+| Linux x86-64（glibc） | `speech2md-v0.1.0-linux-x86_64.tar.gz` |
+| macOS Apple Silicon | `speech2md-v0.1.0-macos-aarch64.tar.gz` |
+| macOS Intel | `speech2md-v0.1.0-macos-x86_64.tar.gz` |
+
+例えば、Apple Silicon版は次のように展開して起動できます。
+
+```sh
+tar -xzf dist/speech2md-v0.1.0-macos-aarch64.tar.gz
+./bin/speech2md --help
+```
+
+GitHub Actionsの`POSIX binaries`ワークフローでは、3環境それぞれでテストし、CLIとwhisper.cppエンジンを生成します。
+実行結果のArtifactsからOS別に取得できます。PR、mainまたは`feat/**`ブランチへのpush、`v*`タグ、手動実行に対応しています。
+成果物は14日間保存します。GitHub Releasesへの公開とエンジンのマニフェスト登録は別途必要です。
 
 ## 初回セットアップ
 
