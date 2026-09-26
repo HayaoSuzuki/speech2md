@@ -53,6 +53,9 @@ pub struct TranscribeArgs {
 pub enum WhisperChoice {
     Base,
     Small,
+    Medium,
+    LargeV3,
+    LargeV3Turbo,
 }
 
 #[derive(Clone, Copy, Debug, Subcommand)]
@@ -82,6 +85,9 @@ pub enum ModelCommand {
 pub enum ModelChoice {
     WhisperBase,
     WhisperSmall,
+    WhisperMedium,
+    WhisperLargeV3,
+    WhisperLargeV3Turbo,
     SpeakerSegmentation,
     SpeakerEmbedding,
 }

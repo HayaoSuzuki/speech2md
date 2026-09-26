@@ -26,7 +26,11 @@ fn usage_errors_exit_with_code_two() {
 }
 
 #[test]
-#[cfg(target_os = "windows")]
+#[cfg(any(
+    target_os = "windows",
+    all(target_os = "linux", target_arch = "x86_64"),
+    all(target_os = "macos", target_arch = "aarch64")
+))]
 fn install_reports_a_network_failure_without_leaving_the_test_root() {
     let root = tempfile::tempdir().expect("temporary engine root");
     yasumaro()
@@ -50,11 +54,18 @@ fn list_is_local() {
         .success()
         .stdout(predicate::str::contains(
             "windows-x86_64 whispercpp-v1.9.4-speech2md.1: not installed",
+        ))
+        .stdout(predicate::str::contains(
+            "linux-x86_64 whispercpp-v1.9.4-yasumaro.v0.1.2: not installed",
         ));
 }
 
 #[test]
-#[cfg(target_os = "windows")]
+#[cfg(any(
+    target_os = "windows",
+    all(target_os = "linux", target_arch = "x86_64"),
+    all(target_os = "macos", target_arch = "aarch64")
+))]
 fn verify_reports_an_actionable_missing_engine() {
     let root = tempfile::tempdir().expect("temporary engine root");
 
@@ -69,7 +80,11 @@ fn verify_reports_an_actionable_missing_engine() {
 }
 
 #[test]
-#[cfg(target_os = "windows")]
+#[cfg(any(
+    target_os = "windows",
+    all(target_os = "linux", target_arch = "x86_64"),
+    all(target_os = "macos", target_arch = "aarch64")
+))]
 fn prune_is_idempotent_when_no_obsolete_engine_exists() {
     let root = tempfile::tempdir().expect("temporary engine root");
 
@@ -85,7 +100,11 @@ fn prune_is_idempotent_when_no_obsolete_engine_exists() {
 }
 
 #[test]
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(
+    target_os = "windows",
+    all(target_os = "linux", target_arch = "x86_64"),
+    all(target_os = "macos", target_arch = "aarch64")
+)))]
 fn unpublished_platform_rejects_engine_operations_without_network_access() {
     let root = tempfile::tempdir().expect("temporary engine root");
 

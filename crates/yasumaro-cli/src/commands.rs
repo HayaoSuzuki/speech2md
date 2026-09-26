@@ -238,6 +238,9 @@ impl From<ModelChoice> for ModelId {
         match value {
             ModelChoice::WhisperBase => Self::WhisperBase,
             ModelChoice::WhisperSmall => Self::WhisperSmall,
+            ModelChoice::WhisperMedium => Self::WhisperMedium,
+            ModelChoice::WhisperLargeV3 => Self::WhisperLargeV3,
+            ModelChoice::WhisperLargeV3Turbo => Self::WhisperLargeV3Turbo,
             ModelChoice::SpeakerSegmentation => Self::SpeakerSegmentation,
             ModelChoice::SpeakerEmbedding => Self::SpeakerEmbedding,
         }
@@ -248,6 +251,9 @@ impl From<WhisperChoice> for ModelId {
         match value {
             WhisperChoice::Base => Self::WhisperBase,
             WhisperChoice::Small => Self::WhisperSmall,
+            WhisperChoice::Medium => Self::WhisperMedium,
+            WhisperChoice::LargeV3 => Self::WhisperLargeV3,
+            WhisperChoice::LargeV3Turbo => Self::WhisperLargeV3Turbo,
         }
     }
 }
@@ -287,4 +293,40 @@ fn display_name(path: &Path) -> String {
         .unwrap_or(path.as_os_str())
         .to_string_lossy()
         .into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Command, ModelId};
+
+    #[test]
+    fn transcription_choices_resolve_to_the_selected_model() {
+        for (choice, expected) in [
+            ("base", "whisper-base"),
+            ("small", "whisper-small"),
+            ("medium", "whisper-medium"),
+            ("large-v3", "whisper-large-v3"),
+            ("large-v3-turbo", "whisper-large-v3-turbo"),
+        ] {
+            let cli =
+                Cli::try_parse_from(["yasumaro", "transcribe", "meeting.wav", "--whisper", choice])
+                    .expect("supported transcription model");
+            let Command::Transcribe(arguments) = cli.command else {
+                panic!("expected transcription command");
+            };
+            assert_eq!(ModelId::from(arguments.whisper).to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn transcription_defaults_to_base() {
+        let cli = Cli::try_parse_from(["yasumaro", "transcribe", "meeting.wav"])
+            .expect("default transcription arguments");
+        let Command::Transcribe(arguments) = cli.command else {
+            panic!("expected transcription command");
+        };
+        assert_eq!(ModelId::from(arguments.whisper), ModelId::WhisperBase);
+    }
 }

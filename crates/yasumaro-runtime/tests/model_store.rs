@@ -177,7 +177,7 @@ fn interrupted_response_does_not_replace_an_existing_model() {
 fn embedded_manifest_has_secure_verifiable_entries() {
     let manifest = ModelManifest::embedded().expect("embedded manifest is valid");
 
-    assert_eq!(manifest.specs().len(), 4);
+    assert_eq!(manifest.specs().len(), 7);
     for spec in manifest.specs() {
         assert_eq!(spec.url.scheme(), "https");
         assert!(spec.size > 0);
@@ -245,4 +245,46 @@ fn duplicate_manifest_ids_and_unlisted_install_ids_are_rejected() {
         installer.install(&[ModelId::WhisperSmall]),
         Err(ModelError::InvalidManifest(_))
     ));
+}
+
+#[test]
+fn larger_models_install_to_the_paths_used_by_transcription() {
+    let embedded = ModelManifest::embedded().expect("valid embedded manifest");
+    for (name, file_name) in [
+        ("whisper-medium", "ggml-medium.bin"),
+        ("whisper-large-v3", "ggml-large-v3.bin"),
+        ("whisper-large-v3-turbo", "ggml-large-v3-turbo.bin"),
+    ] {
+        let spec = embedded
+            .specs()
+            .iter()
+            .find(|spec| spec.id.to_string() == name)
+            .expect("larger model is registered");
+        let root = TempDir::new().expect("temporary model root");
+        let store = ModelStore::new(root.path());
+        assert!(matches!(
+            store.require(spec.id),
+            Err(ModelError::MissingModel { install_command, .. })
+                if install_command == format!("yasumaro model install {name}")
+        ));
+        let bytes = b"local model fixture";
+        let (url, server) = model_server(bytes, bytes.len());
+        let manifest = ModelManifest::new(vec![ModelSpec {
+            url: url.parse().expect("local model URL"),
+            size: u64::try_from(bytes.len()).expect("fixture length"),
+            sha256: sha256(bytes),
+            ..spec.clone()
+        }])
+        .expect("valid fixture manifest");
+        ModelInstaller::new(manifest, store.clone())
+            .expect("model installer")
+            .install(&[spec.id])
+            .expect("install selected larger model");
+        server.join().expect("model server exits");
+        let path = store
+            .require(spec.id)
+            .expect("installed model is available");
+        assert_eq!(path, root.path().join(file_name));
+        assert_eq!(std::fs::read(path).expect("installed model bytes"), bytes);
+    }
 }

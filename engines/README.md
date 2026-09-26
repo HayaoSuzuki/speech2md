@@ -32,7 +32,8 @@ that tag so engine installations from different releases remain separate.
 PR and manual runs build preview artifacts without publishing. Their generated
 manifest URLs are not installable release URLs. The checked-in manifest remains
 unchanged; published release CLIs use the generated manifest instead.
-The checked-in manifest still references a published `speech2md` engine archive:
+The checked-in manifest includes the Linux x86-64 and macOS Apple Silicon engines
+published in `v0.1.2`. It also retains the published Windows `speech2md` engine archive:
 only its repository URL changes to `HayaoSuzuki/yasumaro`. Its tag, file name, size,
 and SHA-256 must continue to match the existing release. Newly built archives and
 generated manifests use the `yasumaro` name.

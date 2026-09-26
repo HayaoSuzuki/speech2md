@@ -16,7 +16,8 @@ Windowsでは`target\release\yasumaro.exe`、LinuxとmacOSでは`target/release/
 任意のディレクトリへコピーし、そのディレクトリを`PATH`へ追加してください。
 
 文字起こしにはCPU版whisper.cpp、話者分離にはsherpa-onnxを使用します。
-リポジトリ内の`engines/manifest.json`は既存のWindows版を参照します。
+リポジトリ内の`engines/manifest.json`には、公開済みのWindows版、Linux x86-64版、macOS Apple Silicon版を登録しています。
+これらの環境では、ソースからビルドしたCLIでも`engine install`を実行できます。
 ソースから直接ビルドする場合のエンジン登録手順は[エンジンのビルド手順](../engines/README.md)を参照してください。
 Release用CLIには、同じReleaseで公開する全OSのエンジン配布情報を埋め込みます。
 
