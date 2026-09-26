@@ -1,60 +1,40 @@
-name: CI
+name: Quality
 
 on:
   pull_request:
-  push:
     branches: [main]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: Format, Clippy, and tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  format:
+    name: Rust formatting
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Install Rust 1.85.0
-        uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.85.0
-          components: rustfmt, clippy, llvm-tools-preview
+          components: rustfmt
+      - run: cargo fmt --all --check
 
-      - name: Install nightly for shuffled tests
-        run: rustup toolchain install nightly --profile minimal
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-      - name: Run strict Clippy
-        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-
-      - name: Run workspace tests
-        run: cargo test --workspace --all-features --locked
-
-      - name: Test three random sequential orders
-        shell: pwsh
-        run: |
-          1..3 | ForEach-Object {
-            cargo +nightly test --workspace --all-features --locked -- -Z unstable-options --shuffle --test-threads=1
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-
-      - name: Require complete core coverage
-        run: cargo llvm-cov -p speech2md-core --all-features --fail-under-lines 100 --fail-under-functions 100
-
-      - name: Require complete formats coverage
-        run: cargo llvm-cov -p speech2md-formats --all-features --fail-under-lines 100 --fail-under-functions 100
-
-      - name: Build release CLI
-        run: cargo build --release -p speech2md-cli --locked
+  clippy:
+    name: Strict Clippy
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.85.0
+          components: clippy
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings

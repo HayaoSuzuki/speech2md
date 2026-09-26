@@ -15,14 +15,15 @@ archive=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 work=$(mktemp -d "${TMPDIR:-/tmp}/speech2md-whisper-verify.XXXXXXXX")
 trap 'rm -rf -- "$work"' EXIT
 
+tar -tf "$archive" > "$work/entries"
 while IFS= read -r entry; do
   case "$entry" in
     bin/whisper-cli|LICENSE|build-metadata.json) ;;
     *) echo "unexpected archive entry: $entry" >&2; exit 1 ;;
   esac
-done < <(tar -tf "$archive")
+done < "$work/entries"
 for required in bin/whisper-cli LICENSE build-metadata.json; do
-  tar -tf "$archive" | grep -Fxq "$required"
+  grep -Fxq "$required" "$work/entries"
 done
 tar -xf "$archive" -C "$work"
 exe="$work/bin/whisper-cli"

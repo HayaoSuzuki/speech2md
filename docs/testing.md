@@ -32,7 +32,7 @@ Remove-Item Env:SPEECH2MD_ENGINE_DIR, Env:SPEECH2MD_MODEL_DIR, Env:SPEECH2MD_DIA
 
 ## 通常のテスト
 
-モデルとネットワークを使わないテストは、Windowsのローカル環境とLinuxのGitHub Actionsで実行します。
+モデルとネットワークを使わないworkspaceテストは、GitHub ActionsでWindows x86-64、Linux x86-64、macOS Apple Silicon／Intelの4構成で実行します。
 
 ```console
 cargo fmt --all -- --check
@@ -56,6 +56,25 @@ Windowsで`STATUS_DLL_NOT_FOUND`が発生する場合は、Visual StudioのMSVC 
 
 `speech2md-core`と`speech2md-formats`は、行と関数のカバレッジを100%に保ちます。
 runtimeとCLIでは、ネイティブエンジン、OSエラー、プロセス終了タイミングなどの外部境界を実装内テストだけで網羅できないため、fake engine、ignored実モデルテスト、外部評価を併用します。
+
+## GitHub Actionsの構成
+
+通常CIは用途ごとにファイルを分けています。各ワークフローは`main`宛てのPR、マージキューの検査要求（`merge_group`）、手動実行で起動します。
+`main`へのpushでは起動しないため、PRをマージした直後に同じCIを繰り返しません。
+
+| ファイル | 検査内容 |
+|---|---|
+| [`ci.yml`](../.github/workflows/ci.yml) | Rustfmtと厳格なClippyを独立したジョブで実行 |
+| [`tests.yml`](../.github/workflows/tests.yml) | 4構成のworkspaceテスト |
+| [`shuffled-tests.yml`](../.github/workflows/shuffled-tests.yml) | nightlyで実行順をランダム化した逐次テストを3回実行 |
+| [`coverage.yml`](../.github/workflows/coverage.yml) | coreとformatsそれぞれの行・関数カバレッジ100%を検査 |
+| [`release-automation.yml`](../.github/workflows/release-automation.yml) | タグ採番・競合・再実行・配布情報・バージョン反映のテスト |
+
+[`release.yml`](../.github/workflows/release.yml)はPRでプレビュー成果物を生成し、マージ時にはタグ付けと正式版のビルド・公開を行います。
+workspaceテストとリリーススクリプトのテストは上表へ移してあるため、通常CIとの重複はありません。
+正式版には採番したバージョンとReleaseのURLを埋め込む必要があるため、マージ後にもビルドします。新しく生成したエンジンの実推論・キャンセル、CLIの展開後の起動、チェックサムはその成果物に対して検証します。
+
+[`heavy.yml`](../.github/workflows/heavy.yml)のfuzz targetのコンパイルとworkspace全体のカバレッジ計測は、引き続き手動実行です。
 
 ## SRV-DBの利用範囲
 

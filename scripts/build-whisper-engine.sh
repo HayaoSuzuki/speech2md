@@ -38,7 +38,7 @@ git -C "$work/source" apply "$patch_path"
 
 cmake -S "$work/source" -B "$work/build" \
   -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
-  -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_CUDA=OFF \
+  -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_CUDA=OFF -DGGML_METAL=OFF \
   "-DCMAKE_C_FLAGS=-ffile-prefix-map=$work/source=/speech2md-whisper -fdebug-prefix-map=$work/source=/speech2md-whisper" \
   "-DCMAKE_CXX_FLAGS=-ffile-prefix-map=$work/source=/speech2md-whisper -fdebug-prefix-map=$work/source=/speech2md-whisper" \
   -DWHISPER_BUILD_TESTS=ON -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_FFMPEG=OFF
@@ -61,7 +61,7 @@ with open(path, "w", encoding="utf-8", newline="\n") as f:
     json.dump({"schema_version": 1, "upstream_url": url, "upstream_version": version,
                "upstream_commit": commit, "patch_sha256": patch_hash, "platform": platform,
                "compiler": compiler, "cmake_options": ["BUILD_SHARED_LIBS=OFF", "GGML_NATIVE=OFF",
-               "GGML_OPENMP=OFF", "GGML_CUDA=OFF", "CMAKE_C_FLAGS=-ffile-prefix-map=SOURCE=/speech2md-whisper -fdebug-prefix-map=SOURCE=/speech2md-whisper",
+               "GGML_OPENMP=OFF", "GGML_CUDA=OFF", "GGML_METAL=OFF", "CMAKE_C_FLAGS=-ffile-prefix-map=SOURCE=/speech2md-whisper -fdebug-prefix-map=SOURCE=/speech2md-whisper",
                "CMAKE_CXX_FLAGS=-ffile-prefix-map=SOURCE=/speech2md-whisper -fdebug-prefix-map=SOURCE=/speech2md-whisper", "WHISPER_BUILD_TESTS=ON",
                "WHISPER_BUILD_EXAMPLES=ON", "WHISPER_FFMPEG=OFF"]}, f, indent=2)
     f.write("\n")
