@@ -2,6 +2,12 @@ name: heavy
 
 on:
   workflow_dispatch:
+    inputs:
+      run_fuzz_check:
+        description: Compile all cargo-fuzz targets
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -15,10 +21,22 @@ jobs:
       - name: Build patched whisper.cpp
         run: ./scripts/build-whisper-engine.sh dist
       - name: Verify archive contract
-        run: ./scripts/verify-whisper-engine.sh dist/speech2md-whispercpp-v1.9.4-linux-x86_64.tar.gz
+        run: ./scripts/verify-whisper-engine.sh --contract-only dist/speech2md-whispercpp-v1.9.4-linux-x86_64.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: speech2md-whispercpp-v1.9.4-linux-x86_64
           path: dist/speech2md-whispercpp-v1.9.4-linux-x86_64.tar.gz
           if-no-files-found: error
           retention-days: 7
+
+  fuzz-check:
+    if: ${{ inputs.run_fuzz_check }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --version 0.13.2 --locked
+      - name: Compile fuzz targets
+        run: cargo +nightly fuzz check

@@ -1582,7 +1582,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "speech2md-core",
- "speech2md-formats",
  "symphonia",
  "tar",
  "tempfile",

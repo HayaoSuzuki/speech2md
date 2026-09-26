@@ -1,5 +1,7 @@
 use std::io::{Cursor, Write};
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
+use std::thread;
+use std::time::Duration;
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
@@ -162,6 +164,81 @@ fn installs_verified_zip_and_tar_gz_archives() {
 }
 
 #[test]
+fn detects_and_repairs_a_modified_installed_executable() {
+    let bytes = zip_archive(&[("bin/whisper-cli.exe", b"verified executable")]);
+    let root = TempDir::new().expect("temporary engine root");
+    let engine = spec(Platform::WindowsX86_64, "engine.zip", &bytes);
+    install(bytes.clone(), engine.clone(), &root);
+    let store = EngineStore::new(root.path());
+    let executable = store
+        .require(&engine)
+        .expect("engine initially verifies")
+        .executable()
+        .to_path_buf();
+
+    std::fs::write(&executable, b"modified executable").expect("tamper with executable");
+    assert!(matches!(
+        store.require(&engine),
+        Err(EngineArtifactError::CorruptEngine { .. })
+    ));
+
+    EngineInstaller::new(
+        BytesSource {
+            bytes: bytes.into(),
+            fail_after_write: false,
+        },
+        store,
+    )
+    .install(&engine)
+    .expect("reinstall repairs corruption");
+    assert_eq!(
+        std::fs::read(executable).expect("read repaired executable"),
+        b"verified executable"
+    );
+}
+
+#[test]
+fn reinstall_waits_for_an_active_engine_lease() {
+    let bytes = zip_archive(&[("bin/whisper-cli.exe", b"verified executable")]);
+    let root = TempDir::new().expect("temporary engine root");
+    let engine = spec(Platform::WindowsX86_64, "engine.zip", &bytes);
+    install(bytes.clone(), engine.clone(), &root);
+    let store = EngineStore::new(root.path());
+    let available_engine = store.require(&engine).expect("engine initially verifies");
+    let executable = available_engine.executable().to_path_buf();
+    let lease = available_engine.acquire().expect("acquire engine lease");
+    std::fs::write(&executable, b"modified executable").expect("tamper with executable");
+
+    let (completed_tx, completed_rx) = mpsc::channel();
+    let repair = EngineInstaller::new(
+        BytesSource {
+            bytes: bytes.into(),
+            fail_after_write: false,
+        },
+        store,
+    );
+    let handle = thread::spawn(move || {
+        let result = repair.install(&engine);
+        completed_tx.send(result).expect("report install result");
+    });
+
+    assert!(matches!(
+        completed_rx.recv_timeout(Duration::from_millis(200)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    drop(lease);
+    completed_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("installer resumes after lease release")
+        .expect("reinstall succeeds");
+    handle.join().expect("installer thread exits");
+    assert_eq!(
+        std::fs::read(executable).expect("read repaired executable"),
+        b"verified executable"
+    );
+}
+
+#[test]
 fn verification_or_download_failure_leaves_no_partial_install() {
     let bytes = zip_archive(&[("bin/whisper-cli.exe", b"new executable")]);
     let root = TempDir::new().expect("temporary engine root");
@@ -191,12 +268,11 @@ fn verification_or_download_failure_leaves_no_partial_install() {
         interrupted.install(&engine),
         Err(EngineArtifactError::Download(_))
     ));
-    assert!(
-        std::fs::read_dir(root.path())
-            .expect("read root")
-            .next()
-            .is_none()
-    );
+    let remaining = std::fs::read_dir(root.path())
+        .expect("read root")
+        .map(|entry| entry.expect("read root entry").file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(remaining, [".locks"]);
 }
 
 #[test]
@@ -358,4 +434,26 @@ fn require_rejects_an_executable_path_outside_its_installation() {
         EngineStore::new(root.path()).require(&engine),
         Err(EngineArtifactError::InvalidManifest(_))
     ));
+}
+
+#[test]
+fn install_rejects_an_unsafe_version_before_creating_its_lock() {
+    let root = TempDir::new().expect("temporary engine root");
+    let bytes = zip_archive(&[("bin/whisper-cli.exe", b"fixture")]);
+    let mut engine = spec(Platform::WindowsX86_64, "engine.zip", &bytes);
+    engine.version = "../escaped".into();
+    let escaped_lock = root.path().join("escaped--windows-x86_64.lock");
+    let installer = EngineInstaller::new(
+        BytesSource {
+            bytes: bytes.into(),
+            fail_after_write: false,
+        },
+        EngineStore::new(root.path()),
+    );
+
+    assert!(matches!(
+        installer.install(&engine),
+        Err(EngineArtifactError::InvalidManifest(_))
+    ));
+    assert!(!escaped_lock.exists());
 }

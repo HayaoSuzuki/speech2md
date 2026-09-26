@@ -41,6 +41,9 @@ try {
         -DGGML_NATIVE=OFF `
         -DGGML_OPENMP=OFF `
         -DGGML_CUDA=OFF `
+        "-DCMAKE_C_FLAGS=/experimental:deterministic /Brepro /pathmap:$source=/speech2md-whisper" `
+        "-DCMAKE_CXX_FLAGS=/experimental:deterministic /Brepro /pathmap:$source=/speech2md-whisper /EHsc" `
+        -DCMAKE_EXE_LINKER_FLAGS=/Brepro `
         -DWHISPER_BUILD_TESTS=ON `
         -DWHISPER_BUILD_EXAMPLES=ON `
         -DWHISPER_FFMPEG=OFF
@@ -70,12 +73,22 @@ try {
         patch_sha256 = $patchHash
         platform = 'windows-x86_64'
         compiler = $compiler
-        cmake_options = @('BUILD_SHARED_LIBS=OFF','GGML_NATIVE=OFF','GGML_OPENMP=OFF','GGML_CUDA=OFF','WHISPER_BUILD_TESTS=ON','WHISPER_BUILD_EXAMPLES=ON','WHISPER_FFMPEG=OFF')
+        cmake_options = @('BUILD_SHARED_LIBS=OFF','GGML_NATIVE=OFF','GGML_OPENMP=OFF','GGML_CUDA=OFF','CMAKE_C_FLAGS=/experimental:deterministic /Brepro /pathmap:SOURCE=/speech2md-whisper','CMAKE_CXX_FLAGS=/experimental:deterministic /Brepro /pathmap:SOURCE=/speech2md-whisper /EHsc','CMAKE_EXE_LINKER_FLAGS=/Brepro','WHISPER_BUILD_TESTS=ON','WHISPER_BUILD_EXAMPLES=ON','WHISPER_FFMPEG=OFF')
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $stage 'build-metadata.json') -Encoding utf8NoBOM
 
     $archive = Join-Path $resolvedOutput "speech2md-whispercpp-$upstreamVersion-windows-x86_64.zip"
     if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
-    Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $archive -CompressionLevel Optimal
+    $zip = [IO.Compression.ZipFile]::Open($archive, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($relative in @('bin/whisper-cli.exe', 'LICENSE', 'build-metadata.json')) {
+            $entry = $zip.CreateEntry($relative, [IO.Compression.CompressionLevel]::Optimal)
+            $entry.LastWriteTime = [DateTimeOffset]::FromUnixTimeSeconds(315532800)
+            $input = [IO.File]::OpenRead((Join-Path $stage $relative))
+            $output = $entry.Open()
+            try { $input.CopyTo($output) } finally { $output.Dispose(); $input.Dispose() }
+        }
+    }
+    finally { $zip.Dispose() }
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
     $size = (Get-Item -LiteralPath $archive).Length
     Write-Output ([ordered]@{ path = $archive; size = $size; sha256 = $hash } | ConvertTo-Json -Compress)

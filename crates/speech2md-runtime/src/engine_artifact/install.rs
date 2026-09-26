@@ -2,9 +2,11 @@ use std::fs;
 use std::io::{Read, Write};
 use std::time::Duration;
 
+use fs4::fs_std::FileExt;
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
 
+use super::store::write_integrity_receipt;
 use super::{EngineArtifactError, EngineSpec, EngineStore, InstalledEngine, archive};
 
 /// Supplies archive bytes to the installer. Only implementations of this trait perform download I/O.
@@ -88,11 +90,16 @@ impl<S: EngineArchiveSource> EngineInstaller<S> {
     ///
     /// Returns an error on transfer, verification, extraction, or storage failure.
     pub fn install(&self, spec: &EngineSpec) -> Result<InstalledEngine, EngineArtifactError> {
+        let final_path = self.store.install_dir(spec)?;
         fs::create_dir_all(self.store.root()).map_err(storage)?;
+        let install_lock = self
+            .store
+            .open_lock(&spec.version, &spec.platform.to_string())?;
+        FileExt::lock_exclusive(&install_lock)
+            .map_err(|error| EngineArtifactError::Lock(error.to_string()))?;
         if let Ok(installed) = self.store.require(spec) {
             return Ok(installed);
         }
-        let final_path = self.store.install_dir(spec)?;
 
         let mut archive_file = tempfile::Builder::new()
             .prefix("engine-")
@@ -121,13 +128,32 @@ impl<S: EngineArchiveSource> EngineInstaller<S> {
             .tempdir_in(self.store.root())
             .map_err(storage)?;
         archive::extract(archive_file.path(), spec, staging.path())?;
+        write_integrity_receipt(staging.path(), spec)?;
         if let Some(parent) = final_path.parent() {
             fs::create_dir_all(parent).map_err(storage)?;
         }
         let staging_path = staging.keep();
+        let backup_path = if final_path.exists() {
+            let reservation = tempfile::Builder::new()
+                .prefix("engine-backup-")
+                .tempdir_in(self.store.root())
+                .map_err(storage)?;
+            let path = reservation.path().to_path_buf();
+            reservation.close().map_err(storage)?;
+            fs::rename(&final_path, &path).map_err(storage)?;
+            Some(path)
+        } else {
+            None
+        };
         if let Err(error) = fs::rename(&staging_path, &final_path) {
             let _ignored = fs::remove_dir_all(&staging_path);
+            if let Some(backup) = &backup_path {
+                let _ignored = fs::rename(backup, &final_path);
+            }
             return Err(storage(error));
+        }
+        if let Some(backup) = backup_path {
+            fs::remove_dir_all(backup).map_err(storage)?;
         }
         self.store.require(spec)
     }

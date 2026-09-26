@@ -68,11 +68,18 @@ impl Fixture {
         };
         let install_dir = engine_root.join(&spec.version).join(platform.to_string());
         fs::create_dir_all(install_dir.join("bin")).expect("create fake engine directory");
-        fs::copy(
-            env!("CARGO_BIN_EXE_fake_whisper"),
-            install_dir.join(&executable_path),
+        let installed_executable = install_dir.join(&executable_path);
+        fs::copy(env!("CARGO_BIN_EXE_fake_whisper"), &installed_executable)
+            .expect("copy fake engine");
+        let executable_hash = format!(
+            "{:x}",
+            Sha256::digest(fs::read(&installed_executable).expect("read fake engine"))
+        );
+        fs::write(
+            install_dir.join(".speech2md-integrity"),
+            format!("{}\n{}\n", spec.sha256, executable_hash),
         )
-        .expect("copy fake engine");
+        .expect("write fake engine integrity receipt");
         let capture = root.path().join("capture.json");
         let model = root.path().join("model.json");
         fs::write(

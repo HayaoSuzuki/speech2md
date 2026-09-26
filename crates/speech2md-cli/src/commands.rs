@@ -113,7 +113,9 @@ const fn help(error: &EngineArtifactError) -> &'static str {
         EngineArtifactError::MissingArtifact(_) => {
             "no artifact has been published for this platform; check a newer speech2md release"
         }
-        EngineArtifactError::MissingEngine { .. } => "run `speech2md engine install`",
+        EngineArtifactError::MissingEngine { .. } | EngineArtifactError::CorruptEngine { .. } => {
+            "run `speech2md engine install`"
+        }
         EngineArtifactError::UnsupportedPlatform { .. } => {
             "use windows-x86_64, macos-aarch64, macos-x86_64, or linux-x86_64"
         }
@@ -162,14 +164,22 @@ mod tests {
     }
 
     fn write_installed(root: &TempDir, engine: &EngineSpec) {
-        let executable = root
+        let install_dir = root
             .path()
             .join(&engine.version)
-            .join(engine.platform.to_string())
-            .join(&engine.executable_path);
+            .join(engine.platform.to_string());
+        let executable = install_dir.join(&engine.executable_path);
         std::fs::create_dir_all(executable.parent().expect("executable parent"))
             .expect("create engine directory");
         std::fs::write(executable, b"fixture executable").expect("write executable");
+        std::fs::write(
+            install_dir.join(".speech2md-integrity"),
+            format!(
+                "{}\n{}\n",
+                engine.sha256, "6f1af2dfc4d7f16dacf404b1f6c9fd4a65cfffb8edde6dcf957463a0e41fb1ed"
+            ),
+        )
+        .expect("write integrity receipt");
     }
 
     #[test]
@@ -194,10 +204,10 @@ mod tests {
             .join(&engine.version)
             .join(engine.platform.to_string())
             .join(&engine.executable_path);
-        std::fs::write(executable, b"").expect("truncate executable");
+        std::fs::write(executable, b"tampered executable").expect("modify executable");
         assert!(matches!(
             execute_engine(EngineCommand::Verify, &manifest, &store, engine.platform),
-            Err(EngineArtifactError::MissingEngine { .. })
+            Err(EngineArtifactError::CorruptEngine { .. })
         ));
     }
 

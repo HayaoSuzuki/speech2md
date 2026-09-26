@@ -64,6 +64,14 @@ pub enum EngineArtifactError {
         /// Distribution platform.
         platform: Platform,
     },
+    /// An installed engine no longer matches its installation receipt.
+    #[error("engine {version} for {platform} failed integrity verification")]
+    CorruptEngine {
+        /// Engine version from the embedded manifest.
+        version: String,
+        /// Distribution platform from the embedded manifest.
+        platform: Platform,
+    },
     /// A version lock could not be acquired or inspected.
     #[error("engine lock operation failed: {0}")]
     Lock(String),

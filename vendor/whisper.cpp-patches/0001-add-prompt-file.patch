@@ -174,4 +174,3 @@ index 0000000..f6871eb
 +if (NOT invalid_result EQUAL 1)
 +    message(FATAL_ERROR "invalid UTF-8 prompt was accepted")
 +endif()
-+endif()

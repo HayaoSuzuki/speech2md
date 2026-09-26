@@ -39,6 +39,8 @@ git -C "$work/source" apply "$patch_path"
 cmake -S "$work/source" -B "$work/build" \
   -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
   -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_CUDA=OFF \
+  "-DCMAKE_C_FLAGS=-ffile-prefix-map=$work/source=/speech2md-whisper -fdebug-prefix-map=$work/source=/speech2md-whisper" \
+  "-DCMAKE_CXX_FLAGS=-ffile-prefix-map=$work/source=/speech2md-whisper -fdebug-prefix-map=$work/source=/speech2md-whisper" \
   -DWHISPER_BUILD_TESTS=ON -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_FFMPEG=OFF
 cmake --build "$work/build" --config Release --target whisper-cli --parallel
 ctest --test-dir "$work/build" -C Release -R test-whisper-cli-prompt-file --output-on-failure
@@ -59,15 +61,27 @@ with open(path, "w", encoding="utf-8", newline="\n") as f:
     json.dump({"schema_version": 1, "upstream_url": url, "upstream_version": version,
                "upstream_commit": commit, "patch_sha256": patch_hash, "platform": platform,
                "compiler": compiler, "cmake_options": ["BUILD_SHARED_LIBS=OFF", "GGML_NATIVE=OFF",
-               "GGML_OPENMP=OFF", "GGML_CUDA=OFF", "WHISPER_BUILD_TESTS=ON",
+               "GGML_OPENMP=OFF", "GGML_CUDA=OFF", "CMAKE_C_FLAGS=-ffile-prefix-map=SOURCE=/speech2md-whisper -fdebug-prefix-map=SOURCE=/speech2md-whisper",
+               "CMAKE_CXX_FLAGS=-ffile-prefix-map=SOURCE=/speech2md-whisper -fdebug-prefix-map=SOURCE=/speech2md-whisper", "WHISPER_BUILD_TESTS=ON",
                "WHISPER_BUILD_EXAMPLES=ON", "WHISPER_FFMPEG=OFF"]}, f, indent=2)
     f.write("\n")
 PY
 
 archive="$output/speech2md-whispercpp-$upstream_version-$platform.tar.gz"
-if tar --version 2>/dev/null | grep -q GNU; then
-  tar --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric-owner -C "$work/stage" -czf "$archive" .
-else
-  COPYFILE_DISABLE=1 tar -C "$work/stage" -czf "$archive" .
-fi
+python3 - "$work/stage" "$archive" <<'PY'
+import gzip, os, sys, tarfile
+stage, archive = sys.argv[1:]
+files = ("bin/whisper-cli", "LICENSE", "build-metadata.json")
+with open(archive, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as gz:
+    with tarfile.open(fileobj=gz, mode="w", format=tarfile.GNU_FORMAT) as tar:
+        for relative in files:
+            source = os.path.join(stage, *relative.split("/"))
+            info = tar.gettarinfo(source, arcname=relative)
+            info.uid = info.gid = 0
+            info.uname = info.gname = "root"
+            info.mtime = 0
+            info.mode = 0o755 if relative == "bin/whisper-cli" else 0o644
+            with open(source, "rb") as data:
+                tar.addfile(info, data)
+PY
 printf '{"path":"%s","size":%s,"sha256":"%s"}\n' "$archive" "$(wc -c < "$archive" | tr -d ' ')" "$(sha256_file "$archive")"

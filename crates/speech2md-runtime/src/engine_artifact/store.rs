@@ -1,13 +1,16 @@
 use std::env;
 use std::fs::{self, File, OpenOptions};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
 use fs4::fs_std::FileExt;
+use sha2::{Digest, Sha256};
 
 use super::{EngineArtifactError, EngineSpec, Platform};
 
 const ENGINE_DIRECTORY_ENV: &str = "SPEECH2MD_ENGINE_DIR";
+const INTEGRITY_RECEIPT: &str = ".speech2md-integrity";
 
 /// Filesystem location containing installed engine versions.
 #[derive(Clone, Debug)]
@@ -37,13 +40,27 @@ impl EngineStore {
         let install_dir = self.install_dir(spec)?;
         let executable = install_dir.join(&spec.executable_path);
         let executable_is_nonempty = executable
-            .metadata()
-            .is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0);
+            .symlink_metadata()
+            .is_ok_and(|metadata| is_nonempty_regular_file(&metadata));
         if !executable_is_nonempty {
             return Err(EngineArtifactError::MissingEngine {
                 version: spec.version.clone(),
                 platform: spec.platform,
             });
+        }
+        let corrupt = || EngineArtifactError::CorruptEngine {
+            version: spec.version.clone(),
+            platform: spec.platform,
+        };
+        let receipt =
+            fs::read_to_string(install_dir.join(INTEGRITY_RECEIPT)).map_err(|_error| corrupt())?;
+        let mut lines = receipt.lines();
+        let actual_executable = sha256_file(&executable).map_err(storage)?;
+        if lines.next() != Some(spec.sha256.as_str())
+            || lines.next() != Some(actual_executable.as_str())
+            || lines.next().is_some()
+        {
+            return Err(corrupt());
         }
         Ok(InstalledEngine {
             root: self.root.clone(),
@@ -117,7 +134,11 @@ impl EngineStore {
             .join(spec.platform.to_string()))
     }
 
-    fn open_lock(&self, version: &str, platform: &str) -> Result<File, EngineArtifactError> {
+    pub(super) fn open_lock(
+        &self,
+        version: &str,
+        platform: &str,
+    ) -> Result<File, EngineArtifactError> {
         let directory = self.root.join(".locks");
         fs::create_dir_all(&directory).map_err(storage)?;
         OpenOptions::new()
@@ -128,6 +149,37 @@ impl EngineStore {
             .open(directory.join(format!("{version}--{platform}.lock")))
             .map_err(storage)
     }
+}
+
+pub(super) fn write_integrity_receipt(
+    install_dir: &Path,
+    spec: &EngineSpec,
+) -> Result<(), EngineArtifactError> {
+    let executable_hash = sha256_file(&install_dir.join(&spec.executable_path)).map_err(storage)?;
+    let mut receipt = File::create(install_dir.join(INTEGRITY_RECEIPT)).map_err(storage)?;
+    writeln!(receipt, "{}\n{}", spec.sha256, executable_hash).map_err(storage)?;
+    receipt.sync_all().map_err(storage)
+}
+
+fn sha256_file(path: &Path) -> io::Result<String> {
+    let mut input = File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 64 * 1_024].into_boxed_slice();
+    loop {
+        let count = input.read(&mut buffer)?;
+        if count == 0 {
+            return Ok(format!("{:x}", hasher.finalize()));
+        }
+        hasher.update(&buffer[..count]);
+    }
+}
+
+#[allow(
+    clippy::filetype_is_file,
+    reason = "integrity verification must reject symlinks and every other non-regular file type"
+)]
+fn is_nonempty_regular_file(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_file() && metadata.len() > 0
 }
 
 /// An installed engine that has not yet been locked for execution.

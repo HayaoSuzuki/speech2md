@@ -8,16 +8,20 @@ Build on the target operating system:
 
 ```powershell
 .\scripts\build-whisper-engine.ps1 -OutputDirectory .\dist
-.\scripts\verify-whisper-engine.ps1 -Archive .\dist\speech2md-whispercpp-v1.9.4-windows-x86_64.zip
+.\scripts\verify-whisper-engine.ps1 -Archive .\dist\speech2md-whispercpp-v1.9.4-windows-x86_64.zip -ContractOnly
 ```
 
 ```sh
 ./scripts/build-whisper-engine.sh ./dist
-./scripts/verify-whisper-engine.sh ./dist/speech2md-whispercpp-v1.9.4-linux-x86_64.tar.gz
+./scripts/verify-whisper-engine.sh --contract-only ./dist/speech2md-whispercpp-v1.9.4-linux-x86_64.tar.gz
 ```
 
-For an end-to-end offline check, pass a local model and a short local WAV fixture as
-the final two verification arguments. Neither file is uploaded or packaged.
+`--contract-only` checks archive shape, executable startup, and prompt handling without
+a model. It is suitable for build jobs, but not release approval. Before publishing,
+omit that flag and pass a local model and a short local WAV fixture (PowerShell:
+`-Model` and `-Fixture`). Full verification runs offline inference and terminates a
+second inference process to check cancellation cleanup. The fixture must run for more
+than 100 ms. Neither file is uploaded or packaged.
 
 Release procedure:
 
