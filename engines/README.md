@@ -21,10 +21,17 @@ from the build host. Substitute that platform in the archive name above.
 It requires Git, CMake, a C/C++ compiler, and Python 3. Metal and CUDA are
 explicitly disabled for CPU-only inference; no separate Metal resources are needed.
 
-The `POSIX binaries` workflow builds and contract-checks all three platforms on
-native GitHub-hosted runners, alongside the CLI archives. Download these files
-from the workflow's platform-specific artifacts. They are build artifacts, not
-published engine releases; the release procedure below still applies.
+The `Build and release` workflow builds all four platforms on native runners.
+Every engine is checked with a hash-verified base model and the repository's tone
+fixture, including offline inference and cancellation. The workflow then generates
+a manifest from the exact archives, embeds it in each CLI, and publishes the CLI
+and engine archives together after a PR is merged into `main`. CLI versions match
+the automatically reserved `vMAJOR.MINOR.PATCH` tag. The manifest's version includes
+that tag so engine installations from different releases remain separate.
+
+PR and manual runs build preview artifacts without publishing. Their generated
+manifest URLs are not installable release URLs. The checked-in manifest remains
+unchanged; published release CLIs use the generated manifest instead.
 
 `--contract-only` checks archive shape, executable startup, and prompt handling without
 a model. It is suitable for build jobs, but not release approval. Before publishing,
@@ -33,7 +40,7 @@ omit that flag and pass a local model and a short local WAV fixture (PowerShell:
 second inference process to check cancellation cleanup. The fixture must run for more
 than 100 ms. Neither file is uploaded or packaged.
 
-Release procedure:
+Manual engine release procedure (for source builds):
 
 1. Build and verify on each target OS. Do not cross-compile an untested archive.
 2. Upload the exact verified archive to a GitHub Release.

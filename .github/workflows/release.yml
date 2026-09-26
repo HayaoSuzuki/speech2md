@@ -1,0 +1,246 @@
+name: Build and release
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  # The merged commit is trusted base-branch code. This also permits publishing
+  # after merging a fork PR; ordinary pull_request tokens remain read-only.
+  pull_request_target:
+    branches: [main]
+    types: [closed]
+  push:
+    branches: ['feat/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Separate merged commits must never cancel each other's pending releases.
+  group: release-${{ github.event_name }}-${{ github.event.pull_request.merge_commit_sha || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.merged == true
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      commit: ${{ steps.version.outputs.commit }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Test release automation
+        run: python scripts/test_release.py
+      - name: Reserve release tag or choose preview version
+        id: version
+        env:
+          PUBLISH: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merged == true }}
+          COMMIT: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+        run: |
+          if [[ "$PUBLISH" == true ]]; then
+            tag=$(python scripts/release.py tag --commit "$COMMIT")
+          else
+            base=$(python -c 'import tomllib; print(tomllib.load(open("crates/speech2md-cli/Cargo.toml", "rb"))["package"]["version"])')
+            tag="v${base}-preview.${GITHUB_RUN_ID}"
+          fi
+          {
+            echo "tag=$tag"
+            echo "version=${tag#v}"
+            echo "commit=$COMMIT"
+            echo "publish=$PUBLISH"
+          } >> "$GITHUB_OUTPUT"
+
+  engines:
+    needs: prepare
+    name: Engine (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x86_64
+            runner: windows-2022
+          - platform: linux-x86_64
+            runner: ubuntu-22.04
+          - platform: macos-aarch64
+            runner: macos-14
+          - platform: macos-x86_64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Build Windows engine
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/build-whisper-engine.ps1 -OutputDirectory dist
+      - name: Build POSIX engine
+        if: runner.os != 'Windows'
+        run: ./scripts/build-whisper-engine.sh dist
+      - name: Download and verify inference test model
+        shell: python
+        run: |
+          import hashlib, json, pathlib, urllib.request
+          spec = next(m for m in json.loads(pathlib.Path('models/manifest.json').read_text())['models'] if m['id'] == 'whisper-base')
+          target = pathlib.Path('target/engine-test/ggml-base.bin')
+          target.parent.mkdir(parents=True, exist_ok=True)
+          urllib.request.urlretrieve(spec['url'], target)
+          assert target.stat().st_size == spec['size'], 'model size mismatch'
+          assert hashlib.sha256(target.read_bytes()).hexdigest() == spec['sha256'], 'model hash mismatch'
+      - name: Verify Windows engine including inference and cancellation
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/verify-whisper-engine.ps1 -Archive dist/speech2md-whispercpp-v1.9.4-windows-x86_64.zip -Model target/engine-test/ggml-base.bin -Fixture crates/speech2md-runtime/tests/fixtures/tone.wav
+      - name: Verify POSIX engine including inference and cancellation
+        if: runner.os != 'Windows'
+        run: ./scripts/verify-whisper-engine.sh "dist/speech2md-whispercpp-v1.9.4-${{ matrix.platform }}.tar.gz" target/engine-test/ggml-base.bin crates/speech2md-runtime/tests/fixtures/tone.wav
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  manifest:
+    needs: [prepare, engines]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: engine-*
+          merge-multiple: true
+          path: dist
+      - name: Generate manifest from verified engine archives
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: python scripts/release.py manifest --directory dist --repository "$GITHUB_REPOSITORY" --tag "$TAG" --output release-metadata/manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata
+          path: release-metadata/manifest.json
+          if-no-files-found: error
+          retention-days: 14
+
+  cli:
+    needs: [prepare, manifest]
+    name: CLI (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x86_64
+            runner: windows-2022
+          - platform: linux-x86_64
+            runner: ubuntu-22.04
+          - platform: macos-aarch64
+            runner: macos-14
+          - platform: macos-x86_64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.85.0
+      - name: Test source workspace
+        run: cargo test --workspace --all-features --locked
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-metadata
+          path: release-metadata
+      - name: Embed release version and engine manifest
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          python scripts/release.py set-version "$VERSION"
+          cp release-metadata/manifest.json engines/manifest.json
+      - name: Build and verify packaged CLI
+        run: python scripts/build-cli.py dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: [prepare, engines, manifest, cli]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: engine-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-metadata
+          path: dist
+      - name: Check release assets and write checksums
+        shell: python
+        run: |
+          import hashlib, json, pathlib
+          root = pathlib.Path('dist')
+          manifest = json.loads((root / 'manifest.json').read_text())
+          for spec in manifest['artifacts']:
+              data = (root / spec['archive_name']).read_bytes()
+              assert len(data) == spec['size']
+              assert hashlib.sha256(data).hexdigest() == spec['sha256']
+          archives = sorted([*root.glob('*.tar.gz'), *root.glob('*.zip')])
+          assert len(archives) == 8, 'expected four CLI and four engine archives'
+          (root / 'SHA256SUMS').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' for p in archives))
+      - name: Publish complete release (reruns preserve published assets)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --json isDraft > release-state.json 2>/dev/null; then
+            if [[ $(python -c 'import json; print(json.load(open("release-state.json"))["isDraft"])') == False ]]; then
+              echo "Release $TAG is already published; leaving its assets unchanged."
+              exit 0
+            fi
+          else
+            gh release create "$TAG" --verify-tag --draft --title "speech2md $TAG" --generate-notes
+          fi
+          gh release upload "$TAG" dist/* --clobber
+          gh release edit "$TAG" --draft=false

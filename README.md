@@ -9,8 +9,9 @@ Windows x86-64、Linux x86-64（glibc）、macOS（Apple Silicon／Intel）向�
 GPUは使用せず、CPUだけで処理します。
 OSとCPUごとに異なる実行ファイルを生成するため、POSIX環境共通の単一バイナリではありません。
 
-現時点で`engine install`からダウンロードできるwhisper.cppエンジンはWindows x86-64版だけです。
-LinuxとmacOSで文字起こしを利用するには、[`engines/README.md`](engines/README.md)の手順でエンジンをビルド・検証・公開し、`engines/manifest.json`へ登録してからCLIを再ビルドする必要があります。
+Release用CLIには、同じReleaseで公開する全OSのエンジン配布情報を埋め込みます。
+各OSで`engine install`を実行すると、そのOSとCPUに合うエンジンを取得できます。
+リポジトリ内の`engines/manifest.json`は既存のWindows版を参照します。ソースから直接ビルドする場合のエンジン登録手順は[`engines/README.md`](engines/README.md)を参照してください。
 
 ## 対応する入力と出力
 
@@ -35,14 +36,15 @@ Windowsでは`target\release\speech2md.exe`、LinuxとmacOSでは`target/release
 
 ### Linux／macOS向け配布ファイルの生成
 
-対象のOSとCPU上で次のコマンドを実行します。Rustに加えてPython 3が必要です。
+対象のOSとCPU上で次のコマンドを実行します。Rustに加えてPython 3.12以降が必要です。
 
 ```sh
 ./scripts/build-posix-cli.sh ./dist
 ```
 
-`dist/`へ`bin/speech2md`、README、ライセンスを含むアーカイブとSHA-256ファイルを生成します。
-ビルド時にCLIの起動と`doctor`を確認します。推論エンジンとモデルは含みません。
+`dist/`へ`bin/speech2md`、README、ライセンス、エンジン配布情報を含むアーカイブとSHA-256ファイルを生成します。
+展開後のCLIのバージョン、起動、`doctor`、エンジン配布情報を確認します。推論エンジンとモデルは含みません。
+Windowsでは`python scripts/build-cli.py dist`で`.zip`を生成できます。
 
 | 環境 | CLIアーカイブ |
 |---|---|
@@ -57,9 +59,23 @@ tar -xzf dist/speech2md-v0.1.0-macos-aarch64.tar.gz
 ./bin/speech2md --help
 ```
 
-GitHub Actionsの`POSIX binaries`ワークフローでは、3環境それぞれでテストし、CLIとwhisper.cppエンジンを生成します。
-実行結果のArtifactsからOS別に取得できます。PR、mainまたは`feat/**`ブランチへのpush、`v*`タグ、手動実行に対応しています。
-成果物は14日間保存します。GitHub Releasesへの公開とエンジンのマニフェスト登録は別途必要です。
+### マージ時の自動リリース
+
+`main`へのPRをマージすると、GitHub Actionsの`Build and release`ワークフローが次の処理を実行します。
+
+1. マージコミットへ`vMAJOR.MINOR.PATCH`タグを付けます。既存の`v`タグの最大バージョンからパッチ番号を1増やします。初回はCLIの`Cargo.toml`のバージョンを使います。
+2. Windows x86-64、Linux x86-64、macOS Apple Silicon／Intelのエンジンをビルドし、実モデルで推論とキャンセルを検証します。
+3. 各エンジンのサイズ、SHA-256、ReleaseのURLからマニフェストを生成します。
+4. 各OSでworkspaceテストを実行し、タグと同じバージョンおよび生成したマニフェストをCLIへ埋め込みます。
+5. 全構成が成功した場合に、CLIとエンジンの計8アーカイブ、マニフェスト、チェックサムをGitHub Releaseへ登録して公開します。
+
+ソースのバージョンとマニフェストの変更はビルド環境内で行い、`main`への書き戻しはありません。
+失敗した実行はGitHub Actionsから再実行できます。同じコミットではタグを再利用し、公開済みReleaseのファイルは置き換えません。
+マージせずに閉じたPRでは、タグもReleaseも作りません。
+
+PRの作成・更新、`feat/**`へのpush、手動実行では、同じビルド処理を公開なしで検証します。
+プレビュー成果物は実行結果のArtifactsから取得でき、14日間保存します。
+プレビューのエンジンURLは未公開のため、`engine install`で利用する場合はマージ後のRelease版CLIを使用してください。
 
 ## 初回セットアップ
 
