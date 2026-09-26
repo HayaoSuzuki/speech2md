@@ -8,6 +8,24 @@
       "sha256": "c7d7b2eb2506910666b81bddd77ac35a7ad3b3c9eba648526085dcf8629f9862",
       "archive_name": "speech2md-whispercpp-v1.9.4-windows-x86_64.zip",
       "executable_path": "bin/whisper-cli.exe"
+    },
+    {
+      "version": "whispercpp-v1.9.4-yasumaro.v0.1.2",
+      "platform": "macos-aarch64",
+      "url": "https://github.com/HayaoSuzuki/yasumaro/releases/download/v0.1.2/yasumaro-whispercpp-v1.9.4-macos-aarch64.tar.gz",
+      "size": 1088555,
+      "sha256": "2eabae465bcdaa8d037b846d5a32798097fcced9dcf66e47002fb5b1ec119a56",
+      "archive_name": "yasumaro-whispercpp-v1.9.4-macos-aarch64.tar.gz",
+      "executable_path": "bin/whisper-cli"
+    },
+    {
+      "version": "whispercpp-v1.9.4-yasumaro.v0.1.2",
+      "platform": "linux-x86_64",
+      "url": "https://github.com/HayaoSuzuki/yasumaro/releases/download/v0.1.2/yasumaro-whispercpp-v1.9.4-linux-x86_64.tar.gz",
+      "size": 1218560,
+      "sha256": "383e4fc917c0cf3d9c794464ce695326eac2227aa461082b6d6fafaa5b990142",
+      "archive_name": "yasumaro-whispercpp-v1.9.4-linux-x86_64.tar.gz",
+      "executable_path": "bin/whisper-cli"
     }
   ]
 }

@@ -22,7 +22,7 @@ impl ModelInstaller {
     pub fn new(manifest: ModelManifest, store: ModelStore) -> Result<Self, ModelError> {
         let client = Client::builder()
             .connect_timeout(std::time::Duration::from_secs(30))
-            .timeout(std::time::Duration::from_secs(30 * 60))
+            .timeout(std::time::Duration::from_mins(30))
             .build()
             .map_err(|error| ModelError::Download {
                 id: ModelId::WhisperBase,

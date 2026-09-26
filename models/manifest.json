@@ -19,6 +19,33 @@
       "file_name": "ggml-small.bin"
     },
     {
+      "id": "whisper-medium",
+      "engine_version": "whispercpp-v1.9.4",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-medium.bin",
+      "size": 1533763059,
+      "sha256": "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+      "license": "MIT",
+      "file_name": "ggml-medium.bin"
+    },
+    {
+      "id": "whisper-large-v3",
+      "engine_version": "whispercpp-v1.9.4",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3.bin",
+      "size": 3095033483,
+      "sha256": "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2",
+      "license": "MIT",
+      "file_name": "ggml-large-v3.bin"
+    },
+    {
+      "id": "whisper-large-v3-turbo",
+      "engine_version": "whispercpp-v1.9.4",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo.bin",
+      "size": 1624555275,
+      "sha256": "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+      "license": "MIT",
+      "file_name": "ggml-large-v3-turbo.bin"
+    },
+    {
       "id": "speaker-segmentation",
       "engine_version": "sherpa-onnx-1.13.8",
       "url": "https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/9403a6902bb58e3d5ae8c7e77c3422de279db2e0/model.onnx",

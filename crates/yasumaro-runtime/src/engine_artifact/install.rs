@@ -37,7 +37,7 @@ impl HttpEngineArchiveSource {
     pub fn new() -> Result<Self, EngineArtifactError> {
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(30))
-            .timeout(Duration::from_secs(30 * 60))
+            .timeout(Duration::from_mins(30))
             .build()
             .map_err(|error| EngineArtifactError::Download(error.to_string()))?;
         Ok(Self { client })

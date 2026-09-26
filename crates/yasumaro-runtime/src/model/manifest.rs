@@ -13,6 +13,9 @@ const EMBEDDED_MANIFEST: &str = include_str!("../../../../models/manifest.json")
 pub enum ModelId {
     WhisperBase,
     WhisperSmall,
+    WhisperMedium,
+    WhisperLargeV3,
+    WhisperLargeV3Turbo,
     SpeakerSegmentation,
     SpeakerEmbedding,
 }
@@ -22,6 +25,9 @@ impl ModelId {
         match self {
             Self::WhisperBase => "ggml-base.bin",
             Self::WhisperSmall => "ggml-small.bin",
+            Self::WhisperMedium => "ggml-medium.bin",
+            Self::WhisperLargeV3 => "ggml-large-v3.bin",
+            Self::WhisperLargeV3Turbo => "ggml-large-v3-turbo.bin",
             Self::SpeakerSegmentation => "segmentation-3-0.onnx",
             Self::SpeakerEmbedding => "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
         }
@@ -33,6 +39,9 @@ impl fmt::Display for ModelId {
         let value = match self {
             Self::WhisperBase => "whisper-base",
             Self::WhisperSmall => "whisper-small",
+            Self::WhisperMedium => "whisper-medium",
+            Self::WhisperLargeV3 => "whisper-large-v3",
+            Self::WhisperLargeV3Turbo => "whisper-large-v3-turbo",
             Self::SpeakerSegmentation => "speaker-segmentation",
             Self::SpeakerEmbedding => "speaker-embedding",
         };

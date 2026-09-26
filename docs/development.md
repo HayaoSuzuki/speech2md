@@ -6,7 +6,8 @@ yasumaroのビルド、変更の検証、配布ファイルの生成、リリー
 
 ## ソースからのビルド
 
-[Rust 1.85以降](https://www.rust-lang.org/tools/install)を導入し、リポジトリのルートでreleaseバイナリをビルドします。
+[rustup](https://www.rust-lang.org/tools/install)を導入し、リポジトリのルートでreleaseバイナリをビルドします。
+`rust-toolchain.toml`に指定したRust 1.98.1を使用します。CIも同じバージョンで検証します。
 
 ```console
 cargo build --release -p yasumaro-cli --locked
@@ -16,7 +17,8 @@ Windowsでは`target\release\yasumaro.exe`、LinuxとmacOSでは`target/release/
 任意のディレクトリへコピーし、そのディレクトリを`PATH`へ追加してください。
 
 文字起こしにはCPU版whisper.cpp、話者分離にはsherpa-onnxを使用します。
-リポジトリ内の`engines/manifest.json`は既存のWindows版を参照します。
+リポジトリ内の`engines/manifest.json`には、公開済みのWindows版、Linux x86-64版、macOS Apple Silicon版を登録しています。
+これらの環境では、ソースからビルドしたCLIでも`engine install`を実行できます。
 ソースから直接ビルドする場合のエンジン登録手順は[エンジンのビルド手順](../engines/README.md)を参照してください。
 Release用CLIには、同じReleaseで公開する全OSのエンジン配布情報を埋め込みます。
 
@@ -31,6 +33,13 @@ prek run --all-files
 ```
 
 フックはRust関連ファイルの変更時に`cargo fmt`、厳格な`cargo clippy`、workspaceテストを実行します。
+JSON・TOML・YAMLの構文、マージ競合マーカー、ファイル名の大文字・小文字衝突、リンク切れも検査します。
+Pythonスクリプトには構文とデバッガーの消し忘れ検査を適用し、1 MiBを超える新規追加ファイルはコミットを拒否します。
+モデルや評価音声はGit管理に含めず、小さなテスト用フィクスチャだけをコミットしてください。
+
+行末の余分な空白とファイル末尾の改行は自動修正します。Markdownの改行用スペースは保持し、
+`vendor/whisper.cpp-patches/`は空白・改行の自動修正から除外します。
+自動修正された場合は差分を確認してステージし直し、再実行してください。
 
 ## テストと評価
 

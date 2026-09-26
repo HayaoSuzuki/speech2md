@@ -1,4 +1,26 @@
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+        # Patch context lines and whitespace are part of the upstream diff.
+        exclude: ^vendor/whisper\.cpp-patches/
+      - id: end-of-file-fixer
+        exclude: ^vendor/whisper\.cpp-patches/
+      - id: check-case-conflict
+      - id: check-merge-conflict
+        args: [--assume-in-merge]
+      - id: check-symlinks
+      - id: check-json
+      - id: check-toml
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      # Release automation uses Python even though the application is Rust.
+      - id: check-ast
+      - id: debug-statements
+
   - repo: local
     hooks:
       - id: cargo-fmt

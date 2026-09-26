@@ -21,7 +21,7 @@ use crate::{ModelId, ModelStore, RuntimeError, decode_to_pcm};
 const JOB_PREFIX: &str = "yasumaro-job-";
 const OWNER_MARKER: &str = ".yasumaro-owner";
 const OWNER_MARKER_CONTENT: &[u8] = b"yasumaro\n";
-const STALE_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+const STALE_AGE: Duration = Duration::from_hours(24);
 
 /// Local-only services used by one transcription run.
 pub struct RuntimeServices<'a> {

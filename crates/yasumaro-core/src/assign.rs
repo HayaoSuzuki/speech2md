@@ -118,13 +118,14 @@ fn assign_one(
     let mut assigned = Vec::<Utterance>::new();
     for token in tokens {
         let next = utterance(token.span, token.text.clone(), turns, config);
-        if let Some(previous) = assigned.last_mut() {
-            if previous.speaker == next.speaker && previous.span.end() <= next.span.end() {
-                previous.span = TimeSpan::new(previous.span.start(), next.span.end())
-                    .expect("merged token bounds remain ordered");
-                previous.text.push_str(&next.text);
-                continue;
-            }
+        if let Some(previous) = assigned.last_mut()
+            && previous.speaker == next.speaker
+            && previous.span.end() <= next.span.end()
+        {
+            previous.span = TimeSpan::new(previous.span.start(), next.span.end())
+                .expect("merged token bounds remain ordered");
+            previous.text.push_str(&next.text);
+            continue;
         }
         assigned.push(next);
     }

@@ -117,10 +117,15 @@ yasumaro transcribe meeting.wav --speakers 4
 ## 文字起こしモデルとプロンプト
 
 既定の文字起こしモデルは`base`です。
-`small`は保存容量と処理時間が増える代わりに、精度が改善する場合があります。
+`--whisper`で`base`、`small`、`medium`、`large-v3`、`large-v3-turbo`を選択できます。
+大きなモデルでは精度が改善する場合がありますが、必要なメモリと処理時間も増えます。
+モデルをインストールしただけでは切り替わらないため、実行時にも指定してください。
 
 ```console
 yasumaro transcribe meeting.wav --whisper small
+yasumaro transcribe meeting.wav --whisper medium
+yasumaro transcribe meeting.wav --whisper large-v3
+yasumaro transcribe meeting.wav --whisper large-v3-turbo
 yasumaro transcribe meeting.wav --prompt "Rust, Kubernetes, PostgreSQL"
 yasumaro transcribe meeting.wav --prompt-file prompt.txt
 ```
@@ -175,16 +180,22 @@ Linuxで`XDG_DATA_HOME`が未設定の場合は`~/.local/share/yasumaro`以下�
 ## モデルの容量とライセンス
 
 `model install`を引数なしで実行すると、`whisper-base`と話者分離用の2モデルを導入します。
-`whisper-small`は使用する場合だけ個別に導入します。
+`small`以上のモデルは、使用するものだけ個別に導入します。
 
 ```console
 yasumaro model install whisper-small
+yasumaro model install whisper-medium
+yasumaro model install whisper-large-v3
+yasumaro model install whisper-large-v3-turbo
 ```
 
 | モデル | 用途 | ダウンロードサイズ | ライセンス |
 |---|---|---:|---|
 | `whisper-base` | 文字起こし | 148 MB | MIT |
 | `whisper-small` | 文字起こし | 488 MB | MIT |
+| `whisper-medium` | 文字起こし | 1,534 MB | MIT |
+| `whisper-large-v3` | 文字起こし | 3,095 MB | MIT |
+| `whisper-large-v3-turbo` | 文字起こし | 1,625 MB | MIT |
 | `speaker-segmentation` | 話者区間検出 | 6 MB | MIT |
 | `speaker-embedding` | 話者特徴量 | 40 MB | Apache-2.0 |
 
