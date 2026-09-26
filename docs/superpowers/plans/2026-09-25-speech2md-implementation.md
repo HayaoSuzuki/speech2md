@@ -6,14 +6,14 @@
 
 **Architecture:** Cargo workspaceをI/O非依存の`core`、純粋な文書レンダラーの`formats`、音声、モデル、推論、保存を担う`runtime`、利用者との境界を担う`cli`に分ける。ランタイムがI/Oを駆動してエンジン固有値をコア値へ変換し、コアは時刻付き文字列だけを統合する。
 
-**Tech Stack:** Rust 2024、clap 4.5、thiserror 2、Symphonia 0.6、rubato 5、whisper-rs 0.16、sherpa-onnx 1.13.8、reqwest 0.12 blocking、serde 1、sha2 0.10、memmap2 0.9、tempfile 3、pulldown-cmark 0.13、proptest 1、assert_cmd 2。
+**Tech Stack:** Rust 2024、clap 4.5、thiserror 2、Symphonia 0.6、rubato 5、外部プロセスとして実行するwhisper.cpp 1.9.4、sherpa-onnx 1.13.8、reqwest 0.12 blocking、serde 1、sha2 0.10、memmap2 0.9、tempfile 3、pulldown-cmark 0.13、proptest 1、assert_cmd 2。
 
 **Spec:** `docs/superpowers/specs/2026-09-25-speech2md-design.md`
 
 ## Global Constraints
 
-- 対象環境はWindows x86-64、CPU実行とする。
-- 配布対象はWindows x86-64だが、モデル不要テストと手動実モデルテストを実行するためLinuxでもコンパイルおよび実行できる実装にする。
+- 主対象はWindows x86-64とし、GPUを要求しないCPU実行にする。
+- エンジン成果物はWindows x86-64、macOS aarch64、macOS x86-64、Linux x86-64へ配布する。
 - 入力はWAV、MP3、一般的なiPhoneボイスメモのAAC-LC/M4Aを扱う。
 - 文字起こし言語は日本語とし、英語翻訳を行わない。
 - `transcribe`はネットワークへ接続せず、通信は明示的な`model install`だけが行う。
@@ -67,7 +67,8 @@ crates/
       error.rs
       audio/{mod,decode,pcm,resample}.rs
       model/{mod,manifest,store,download}.rs
-      engine/{mod,whisper,sherpa}.rs
+      engine/{mod,process,whisper_json,whisper_wav,sherpa}.rs
+      engine_artifact/{mod,archive,manifest,platform,store}.rs
       pipeline.rs
       output.rs
     tests/{audio,model_store,pipeline,srv_db}.rs
@@ -537,59 +538,17 @@ git add models crates/speech2md-runtime
 git commit -m "feat: install and verify inference models"
 ```
 
-### Task 6: Whisper文字起こしアダプター
+### Task 6: Whisper外部プロセスとエンジン管理（完了）
 
-**Files:**
-- Create: `crates/speech2md-runtime/src/engine/mod.rs`
-- Create: `crates/speech2md-runtime/src/engine/whisper.rs`
-- Modify: `crates/speech2md-runtime/Cargo.toml`
-- Test: `crates/speech2md-runtime/src/engine/whisper.rs`
-- Test: `crates/speech2md-runtime/tests/whisper_model.rs`
+詳細な設計と実装手順は[`2026-09-26-portable-whisper-process-engine.md`](2026-09-26-portable-whisper-process-engine.md)へ分離した。
+コミット`dab5f28`から`792b124`で、`EngineStore`、`InstalledEngine`、`WhisperProcessTranscriber`、JSON変換、WAV staging、`engine install|list|verify|prune`、再現ビルドスクリプトを実装した。
 
-**Interfaces:**
-- Consumes: `&[f32]`の16kHz mono PCM、Whisperモデルパス、`TranscriptionRequest { prompt, threads, cancelled }`。
-- Produces: `trait Transcriber { fn transcribe(&self, samples: &[f32], request: &TranscriptionRequest) -> Result<Vec<TranscribedSegment>, EngineError>; }`。
+`WhisperProcessTranscriber`は導入済みの`whisper-cli`を子プロセスとして起動し、16kHz mono PCMを一時WAVへ書き出す。
+プロンプトはUTF-8ファイルで渡し、標準出力と標準エラーは末尾64KiBだけを保持する。
+キャンセル時は終了要求、5秒待機、強制終了、`wait`の順で回収する。
 
-- [ ] **Step 1: ネイティブ型を使わない変換テストを書く**
-
-```rust
-#[test]
-fn converts_whisper_centiseconds_to_milliseconds() {
-    let span = native_span_to_domain(123, 456).unwrap();
-    assert_eq!(span.start().as_millis(), 1_230);
-    assert_eq!(span.end().as_millis(), 4_560);
-}
-```
-
-別テストで、開始が終了より後のnative segmentを`EngineError::InvalidSegment`にすることと、`AtomicBool=true`ならabort callbackがfalseを返すことを検証する。文字列変換はwhisper-rsが返すUTF-8結果を使い、変換失敗を`EngineError::InvalidText`へ写す。
-
-- [ ] **Step 2: 変換テストの失敗を確認する**
-
-Run: `cargo test -p speech2md-runtime engine::whisper`
-Expected: FAIL with unresolved adapter functions.
-
-- [ ] **Step 3: whisper-rsアダプターを実装する**
-
-`WhisperContextParameters`でGPUを無効にする。`FullParams`は日本語`ja`、翻訳なし、timestampsあり、`Greedy { best_of: 1 }`、論理CPU数に基づくスレッド数、任意のinitial promptを設定する。進捗とabort callbackは本文をログへ出さず、`AtomicBool`だけを読む。
-
-- [ ] **Step 4: 小さなローカルモデル統合テストをignoredで追加する**
-
-`SPEECH2MD_MODEL_DIR`に導入済みモデルがある場合だけ実行し、リポジトリの短い自作fixtureを使って、区間が時刻順で、日本語設定が適用され、テキストが空でないことを検証する。
-
-Run: `cargo test -p speech2md-runtime --test whisper_model -- --ignored`
-Expected: PASS when `SPEECH2MD_MODEL_DIR` points to installed local assets; otherwise the test prints the required setup and returns without downloading.
-
-- [ ] **Step 5: 通常テストを通す**
-
-Run: `cargo test -p speech2md-runtime`
-Expected: PASS without model or network.
-
-- [ ] **Step 6: コミットする**
-
-```bash
-git add crates/speech2md-runtime
-git commit -m "feat: transcribe Japanese audio with whisper.cpp"
-```
+Windows x86-64、macOS aarch64、macOS x86-64、Linux x86-64の成果物は対象OSでビルドしてGitHub Releasesへ公開し、実ファイルのURL、サイズ、SHA-256だけを`engines/manifest.json`へ追加する。
+未公開の対象はマニフェストへ追加せず、`engine install`が`MissingArtifact`を返す。
 
 ### Task 7: sherpa-onnx話者分離アダプター
 
@@ -654,7 +613,7 @@ git commit -m "feat: diarize speakers with sherpa-onnx"
 - Test: `crates/speech2md-runtime/tests/pipeline.rs`
 
 **Interfaces:**
-- Consumes: `Transcriber`, `Diarizer`, `ModelStore`, `TranscribeOptions`, 入力と出力の`Path`。
+- Consumes: `EngineStore`から取得した`InstalledEngine`とその`EngineLease`、`Diarizer`、`ModelStore`、`TranscribeOptions`、入力と出力の`Path`。
 - Produces: `run_transcription(&RuntimeServices, &TranscribeOptions) -> Result<RunReport, RuntimeError>`、分類済み`RuntimeError`、完全な出力または無出力。
 
 - [ ] **Step 1: fake engineを使う縦方向の失敗テストを書く**
@@ -679,7 +638,9 @@ Expected: FAIL with unresolved `run_transcription`.
 
 - [ ] **Step 3: パイプラインを実装する**
 
-処理順序を`decode_to_pcm`、`ModelStore::require`、`Transcriber::transcribe`、`Diarizer::diarize`、`assign_speakers`、`normalize_utterances`、`render_commonmark`、`atomic_write`に固定する。`RuntimeServices`にはデコーダー、transcriber、diarizer、model storeだけを含め、HTTP clientやinstallerを含めない。
+処理順序を`decode_to_pcm`、`EngineStore::require`、`InstalledEngine::acquire`、`ModelStore::require`、`WhisperProcessTranscriber::transcribe`、`Diarizer::diarize`、`assign_speakers`、`normalize_utterances`、`render_commonmark`、`atomic_write`に固定する。
+`WhisperProcessTranscriber`は`EngineLease`、モデルパス、一時ディレクトリから構築する。
+`RuntimeServices`にはデコーダー、engine store、diarizer、model storeを含め、HTTP clientやinstallerを含めない。
 
 - [ ] **Step 4: 原子的出力と上書き規則を実装する**
 
@@ -687,7 +648,10 @@ Expected: FAIL with unresolved `run_transcription`.
 
 - [ ] **Step 5: キャンセルと古い一時領域の掃除を実装する**
 
-`AtomicBool`をWhisperへ渡し、各処理段階の前後で確認する。sherpa呼び出し中は戻るまで待つ。起動時掃除は専用prefixと所有者markerを持ち、24時間より古いディレクトリだけを対象にする。計算したパスがOS一時ディレクトリ配下であることを確認してから削除する。
+各処理段階の前後でキャンセル状態を確認する。
+Whisper実行中はTask 6で実装した子プロセス停止手順を使い、sherpa呼び出し中は戻るまで待つ。
+起動時掃除は専用prefixと所有者markerを持ち、24時間より古いディレクトリだけを対象にする。
+計算したパスがOS一時ディレクトリ配下であることを確認してから削除する。
 
 - [ ] **Step 6: パイプラインテストを通す**
 
@@ -712,8 +676,8 @@ git commit -m "feat: orchestrate offline transcription pipeline"
 - Test: `crates/speech2md-cli/tests/cli.rs`
 
 **Interfaces:**
-- Consumes: Task 5のinstaller/store、Task 8の`run_transcription`と`RuntimeError`。
-- Produces: `speech2md model install|list`、`speech2md transcribe`、`speech2md doctor`、安定した終了コード。
+- Consumes: Task 5のmodel installer/store、Task 6の既存engine subcommands、Task 8の`run_transcription`と`RuntimeError`。
+- Produces: 既存の`speech2md engine install|list|verify|prune`に加え、`speech2md model install|list`、`speech2md transcribe`、`speech2md doctor`、安定した終了コード。
 
 - [ ] **Step 1: assert_cmdによるCLI失敗テストを書く**
 
@@ -745,6 +709,7 @@ struct Cli { #[command(subcommand)] command: Command }
 #[derive(Subcommand)]
 enum Command {
     Transcribe(TranscribeArgs),
+    Engine { #[command(subcommand)] command: EngineCommand },
     Model { #[command(subcommand)] command: ModelCommand },
     Doctor,
 }
@@ -758,7 +723,8 @@ enum Command {
 
 - [ ] **Step 5: `model list`と`doctor`を実装する**
 
-`model list`はID、導入状態、サイズ、検証結果を表示する。`doctor`はWindows x86-64、CPUスレッド数、Whisper CPU情報、モデル存在、ハッシュ、書き込み可能な一時領域を検査し、音声やネットワークへアクセスしない。
+`model list`はID、導入状態、サイズ、検証結果を表示する。
+`doctor`は実行中のOSとCPUアーキテクチャ、CPUスレッド数、導入済みエンジン、モデル存在、ハッシュ、書き込み可能な一時領域を検査し、音声やネットワークへアクセスしない。
 
 - [ ] **Step 6: CLIテストとhelp snapshotを通す**
 
@@ -776,14 +742,14 @@ git commit -m "feat: expose speech2md command line interface"
 
 **Files:**
 - Modify: `crates/speech2md-cli/tests/cli.rs`
-- Create: `.github/workflows/ci.yml`
-- Create: `.github/workflows/heavy.yml`
+- Modify: `.github/workflows/ci.yml`
+- Modify: `.github/workflows/heavy.yml`
 - Modify: `.gitignore`
 - Test: `crates/speech2md-runtime/tests/fixtures/README.md`
 
 **Interfaces:**
 - Consumes: Task 1から9の全公開境界。
-- Produces: UbuntuのモデルなしCI、手動起動するUbuntuの実モデルE2E、ローカルWindows release検証手順。
+- Produces: UbuntuのモデルなしCI、Linux x86-64エンジン成果物の手動ビルド、手動起動するUbuntuの実モデルE2E、WindowsとmacOSのローカルrelease検証手順。
 
 - [ ] **Step 1: fake enginesを注入したE2Eテストを追加する**
 
@@ -839,7 +805,10 @@ jobs:
 
 workflow triggerは`pull_request`と既定ブランチへの`push`に限定する。通常CIにはモデルのダウンロード、ignored test、SRV-DB、長時間性能テストを含めない。jobへ`timeout-minutes: 30`を設定し、ハングによる課金を制限する。
 
-- [ ] **Step 5: Ubuntuの手動実モデルworkflowを作る**
+- [ ] **Step 5: Ubuntuの手動workflowを拡張する**
+
+Task 6で追加した`linux-whisper-engine` jobを維持し、Linux x86-64成果物をビルド、検証して一時artifactとして保存する。
+同じworkflowへ実モデルテストとworkspace coverageの任意jobを追加する。
 
 ```yaml
 name: Heavy model tests
@@ -887,11 +856,16 @@ jobs:
       - run: cargo llvm-cov --workspace --summary-only --show-missing-lines
 ```
 
-二つの手動入力は既定で`false`とし、選択したjobだけを実行する。実モデルjobでは`SPEECH2MD_MODEL_DIR=${{ runner.temp }}/speech2md-models`を指定し、モデルをActions cacheやartifactへ保存しない。ignored test用の短い自作音声fixtureだけを使う。SRV-DBと長時間音声は取得しない。
+二つの手動入力は既定で`false`とし、選択したモデルまたはcoverage jobだけを実行する。
+`linux-whisper-engine` jobの成果物は公開前の検査用であり、マニフェストにはGitHub Releaseへ公開したファイルだけを記録する。
+実モデルjobでは`SPEECH2MD_MODEL_DIR=${{ runner.temp }}/speech2md-models`を指定し、モデルをActions cacheやartifactへ保存しない。
+ignored test用の短い自作音声fixtureだけを使い、SRV-DBと長時間音声は取得しない。
 
-- [ ] **Step 6: Windows releaseバイナリをローカルで検査する**
+- [ ] **Step 6: WindowsとmacOSのreleaseバイナリをローカルで検査する**
 
-Windows上で`dumpbin /dependents target\release\speech2md.exe`を実行し、Visual C++ランタイム以外の未同梱DLLがないことを記録する。`speech2md --help`と`speech2md doctor`をクリーンな一時ディレクトリで実行する。
+Windows上で`dumpbin /dependents target\release\speech2md.exe`を実行し、Visual C++ランタイム以外の未同梱DLLがないことを記録する。
+macOSのaarch64とx86-64では`otool -L`で依存ライブラリを検査する。
+各対象で`speech2md --help`、`speech2md doctor`、エンジン検証スクリプトをクリーンな一時ディレクトリから実行する。
 
 - [ ] **Step 7: 通常CI相当の検証をLinuxで通す**
 
@@ -956,6 +930,7 @@ git commit -m "ci: test speech2md on Linux"
 
 ```console
 speech2md model install
+speech2md engine install
 speech2md transcribe meeting.m4a
 speech2md transcribe meeting.wav --speakers 3 --prompt "Rust, Kubernetes, PostgreSQL"
 speech2md transcribe meeting.mp3 --whisper small --output minutes.md
