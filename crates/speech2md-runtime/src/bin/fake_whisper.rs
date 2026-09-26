@@ -52,6 +52,11 @@ fn write_success(output_prefix: &Path) {
     .expect("write fake JSON");
 }
 
+fn write_empty(output_prefix: &Path) {
+    let path = PathBuf::from(format!("{}.json", output_prefix.display()));
+    fs::write(path, br#"{"transcription":[]}"#).expect("write empty fake JSON");
+}
+
 fn main() -> ExitCode {
     let args = env::args().skip(1).collect::<Vec<_>>();
     let model_path = value_after(&args, "--model");
@@ -62,6 +67,7 @@ fn main() -> ExitCode {
 
     match control.mode.as_str() {
         "success" => write_success(&output_prefix),
+        "empty" => write_empty(&output_prefix),
         "missing" => {}
         "invalid" => {
             let path = PathBuf::from(format!("{}.json", output_prefix.display()));

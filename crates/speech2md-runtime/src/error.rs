@@ -1,5 +1,8 @@
 use thiserror::Error;
 
+use crate::engine_artifact::EngineArtifactError;
+use crate::model::ModelError;
+
 #[derive(Debug, Error)]
 pub enum RuntimeError {
     #[error("audio input or PCM storage failed: {0}")]
@@ -14,4 +17,20 @@ pub enum RuntimeError {
     Resample(String),
     #[error("decoded PCM storage is invalid")]
     InvalidPcm,
+    #[error(transparent)]
+    EngineArtifact(#[from] EngineArtifactError),
+    #[error(transparent)]
+    Model(#[from] ModelError),
+    #[error("transcription failed: {0}")]
+    Transcription(String),
+    #[error("speaker diarization failed: {0}")]
+    Diarization(String),
+    #[error("transcription returned no segments")]
+    EmptyTranscript,
+    #[error("the output already exists; pass --force to replace it")]
+    OutputExists,
+    #[error("output could not be committed: {0}")]
+    Output(String),
+    #[error("transcription was cancelled")]
+    Cancelled,
 }
