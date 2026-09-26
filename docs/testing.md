@@ -1,5 +1,7 @@
 # テストと外部評価
 
+ビルドとリリースの手順は[開発ガイド](development.md)を参照してください。
+
 VOICEPEAKで作成する自作音声による話者分離テストは、[VOICEPEAK話者分離テスト原稿](../test-data/voicepeak/README.md)を参照してください。
 生成した10本のWAVに対し、Whisperを使わず話者分離だけを連続評価できます。
 
@@ -56,6 +58,23 @@ Windowsで`STATUS_DLL_NOT_FOUND`が発生する場合は、Visual StudioのMSVC 
 
 `speech2md-core`と`speech2md-formats`は、行と関数のカバレッジを100%に保ちます。
 runtimeとCLIでは、ネイティブエンジン、OSエラー、プロセス終了タイミングなどの外部境界を実装内テストだけで網羅できないため、fake engine、ignored実モデルテスト、外部評価を併用します。
+
+## Fuzzing
+
+[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz)で音声デコーダー境界、CommonMarkレンダラー、Whisper JSON解析、話者割り当てを検査します。
+通常のpre-commitとPRのCIには含めません。GitHub Actionsでは、手動実行の`heavy.yml`でfuzz targetのコンパイルを検査します。
+
+```console
+rustup toolchain install nightly
+cargo +stable install cargo-fuzz --version 0.13.2 --locked
+cargo +nightly fuzz check
+cargo +nightly fuzz run decode_audio fuzz/corpus/decode_audio crates/speech2md-runtime/tests/fixtures -- -max_total_time=60 -max_len=1048576
+cargo +nightly fuzz run render_commonmark -- -max_total_time=60 -max_len=65536
+```
+
+WindowsではVisual StudioのMSVC C++ x64/x86ビルドツール、C++ AddressSanitizer、Windows 11 SDKが必要です。
+「x64 Native Tools Command Prompt」で`where link`を実行し、使用するVisual Studioの`Hostx64\x64`以下にあるリンカーが先頭に表示されることを確認してください。
+クラッシュ入力は`fuzz/artifacts/`へ保存され、Gitの管理対象には含まれません。
 
 ## GitHub Actionsの構成
 
@@ -185,7 +204,17 @@ speech2md transcribe test-data\performance\meeting-3h.wav --whisper base --outpu
 
 CPU名、論理CPU数、音声時間、処理時間、実時間係数、Peak Working Set、一時ディスクの最大使用量を記録します。
 実時間係数が1.0を超えても値を補正しません。
-READMEの性能表には同じ条件で再測定した結果だけを掲載します。
+同じ条件で再測定した結果を次の表へ記録します。利用者向けに公開できる実測結果はREADMEにも反映します。
+
+### 測定状況
+
+| 測定環境 | 音声時間 | Whisper | 処理時間 | 実時間係数 | ピークメモリ | 一時ディスク |
+|---|---:|---|---:|---:|---:|---:|
+| AMD Ryzen 7 PRO 7840U、16論理CPU | 1時間 | base | 未測定 | 未測定 | 未測定 | 約346 MB以上 |
+| AMD Ryzen 7 PRO 7840U、16論理CPU | 3時間 | base | 未測定 | 未測定 | 未測定 | 約1.04 GB以上 |
+
+一時ディスクの値は16 kHz、mono、`float32` PCMと16-bit WAVの理論上の合計で、ファイルシステムなどの余白を含みません。
+実測値は実モデルと評価音声を準備した後に記録します。
 
 ## データ境界の確認
 
