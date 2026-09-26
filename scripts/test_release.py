@@ -1,5 +1,6 @@
 from pathlib import Path
 import subprocess
+import shlex
 import tempfile
 import unittest
 
@@ -34,6 +35,35 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(git('rev-parse', 'v0.1.0'), first)
             self.assertEqual(git('rev-parse', 'v0.1.1'), second)
             self.assertIn(first, git('ls-remote', '--tags', 'origin', 'v0.1.0'))
+
+    def test_tag_collision_with_another_merge_retries_without_retagging(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            remote = Path(tmp) / 'remote.git'
+            repo = Path(tmp) / 'checkout'
+            rival = Path(tmp) / 'rival'
+            subprocess.run(['git', 'init', '--bare', str(remote)], check=True, capture_output=True)
+            subprocess.run(['git', 'clone', str(remote), str(repo)], check=True, capture_output=True)
+            def git(*args):
+                return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
+            git('config', 'user.name', 'Release test')
+            git('config', 'user.email', 'test@example.invalid')
+            git('commit', '--allow-empty', '-m', 'first')
+            first = git('rev-parse', 'HEAD')
+            git('push', 'origin', 'HEAD:main')
+            subprocess.run(['git', 'clone', '--branch', 'main', str(remote), str(rival)], check=True, capture_output=True)
+            git('commit', '--allow-empty', '-m', 'second')
+            second = git('rev-parse', 'HEAD')
+            git('push', 'origin', 'HEAD:main')
+            # Reserve v0.1.0 in a second checkout between the first run's fetch
+            # and push. The competing tag must survive, and this run must retry.
+            hook = repo / '.git/hooks/pre-push'
+            hook.write_text('#!/bin/sh\nrm -- "$0"\n' +
+                            'git -C ' + shlex.quote(str(rival)) + ' tag v0.1.0\n' +
+                            'git -C ' + shlex.quote(str(rival)) + ' push origin refs/tags/v0.1.0\n')
+            hook.chmod(0o755)
+            self.assertEqual(release.reserve_tag(repo, second, '0.1.0'), 'v0.1.1')
+            self.assertEqual(git('rev-parse', 'v0.1.0'), first)
+            self.assertEqual(git('rev-parse', 'v0.1.1'), second)
 
     def test_manifest_measures_all_four_archives_and_rejects_missing_files(self):
         with tempfile.TemporaryDirectory() as tmp:
