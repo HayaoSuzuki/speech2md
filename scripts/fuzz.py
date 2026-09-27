@@ -50,6 +50,13 @@ def prepare_seeds():
     # container. Use a valid ID3v2.4 tag with one frame-sized padding block.
     id3 = b"ID3\x04\0\0\0\0\0\x0a" + bytes(10)
     seed("decode_audio", "stts-entry-count-after-id3", id3 + oversized)
+    # A variable sample whose declared size is almost 4 GiB. Symphonia 0.5.5
+    # allocated this untrusted size before discovering that the source is short.
+    m4a = (fixtures / "tone.m4a").read_bytes()
+    first_sample_size = m4a.index(b"stsz") + 16
+    huge_sample = (m4a[:first_sample_size] + struct.pack(">I", 2**32 - 1)
+                   + m4a[first_sample_size + 4:])
+    seed("decode_audio", "stsz-sample-size", huge_sample)
     seed("whisper_json", "fixture", (fixtures / "whisper-output.json").read_bytes())
     for name, start, end in (("zero", 0, 0), ("max", 2**64 - 1, 2**64 - 1),
                              ("negative", -1, 1), ("reversed", 1, 0),

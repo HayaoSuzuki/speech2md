@@ -109,6 +109,20 @@ fn with_stts_entry_count(name: &str, entry_count: u32) -> Vec<u8> {
     bytes
 }
 
+/// Replace the first variable sample size in the `stsz` atom of an ISO-BMFF fixture.
+fn with_first_sample_size(name: &str, sample_size: u32) -> Vec<u8> {
+    let mut bytes = std::fs::read(fixture(name)).expect("read fixture");
+    let start = bytes
+        .windows(4)
+        .position(|window| window == b"stsz")
+        .expect("fixture has a sample-size atom");
+    // The first entry follows the atom type, version and flags, constant sample
+    // size, and sample count.
+    let first_entry = start + 16;
+    bytes[first_entry..first_entry + 4].copy_from_slice(&sample_size.to_be_bytes());
+    bytes
+}
+
 /// Prefix an atom that pushes the `ftyp` marker away from the start of the file.
 fn with_leading_atom(bytes: &[u8]) -> Vec<u8> {
     let mut prefixed = 8_u32.to_be_bytes().to_vec();
@@ -161,6 +175,25 @@ fn rejects_an_mp4_sample_table_that_reaches_past_its_atom() {
             );
         }
     }
+}
+
+#[test]
+fn rejects_an_mp4_sample_larger_than_the_source_without_allocating_its_declared_size() {
+    // Fuzzing changed one `stsz` entry in the 33 KiB fixture to nearly 4 GiB.
+    // Symphonia must discover the short source while reading, without reserving
+    // the untrusted sample size up front.
+    let temp_root = TempDir::new().expect("temporary root");
+    let input = temp_root.path().join("oversized-sample.m4a");
+    std::fs::write(&input, with_first_sample_size("tone.m4a", u32::MAX)).expect("write input");
+
+    let error = decode_to_pcm(&input, temp_root.path())
+        .map(|_| ())
+        .expect_err("sample larger than its source");
+
+    assert!(
+        matches!(error, RuntimeError::Decode(_)),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
