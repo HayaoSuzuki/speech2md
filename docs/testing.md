@@ -59,6 +59,27 @@ Windowsで`STATUS_DLL_NOT_FOUND`が発生する場合は、Visual StudioのMSVC 
 `yasumaro-core`と`yasumaro-formats`は、行と関数のカバレッジを100%に保ちます。
 runtimeとCLIでは、ネイティブエンジン、OSエラー、プロセス終了タイミングなどの外部境界を実装内テストだけで網羅できないため、fake engine、ignored実モデルテスト、外部評価を併用します。
 
+## Property-based testing
+
+proptestは通常のworkspaceテストで実行します。主な検査は次のとおりです。
+
+- core: `u64`上限付近と長さ0の区間、話者割り当ての閾値直前・一致・直後、同率時の話者ID選択、複数セグメントとトークンなしの本文保持。
+- 正規化: Unicodeの文字数と結合間隔の境界、重複区間の接触・重なり、同一・異なる・未知の話者。一意な本文では保持と冪等性も検査します。
+- formats: 複数発話、時刻の桁上がり、話者ID上限、Markdown構造の混入、表示文字の欠落や二重エスケープ。空白・改行は表示文字比較から除き、NULはCommonMarkの置換文字として扱います。
+- JSON解析: `u64`全域の時刻とUnicode本文の保持、各階層の未知フィールド、正常な文書の途中に挿入された不正な数値・型・必須フィールド欠落の拒否。
+- 音声: 6種類のサンプルレート、チャンク境界前後の長さと無音、生成したmono/stereo WAVの変換後の長さ・有限値・16 kHzでのサンプル値。
+
+core・formatsとJSON解析の生成件数は、`PROPTEST_CASES`で増やせます。通常はproptest既定の256ケースです。音声変換は実行時間を抑えるため、リサンプルの各propertyを64ケース、生成WAVを32ケースに固定しています。
+
+```console
+PROPTEST_CASES=1024 cargo test -p yasumaro-core -p yasumaro-formats --test properties --locked
+PROPTEST_CASES=1024 cargo test -p yasumaro-runtime --lib engine::whisper_json --locked
+```
+
+PowerShellでは、実行前に`$env:PROPTEST_CASES = "1024"`を設定し、上記の`cargo`以降を実行します。終了後は`Remove-Item Env:PROPTEST_CASES`で解除できます。
+
+失敗時にproptestが保存する`*.proptest-regressions`はコミット対象です。生成器を変更すると同じseedから得られる入力も変わり得るため、修正した不具合は縮小後の具体的な入力を使う通常の回帰テストにも残します。
+
 ## Fuzzing
 
 [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz)で次の7 targetを検査します。

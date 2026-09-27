@@ -83,7 +83,10 @@ mod tests {
 
         #[test]
         fn sixteen_kilohertz_preserves_every_sample(
-            samples in prop::collection::vec(-1.0_f32..=1.0, 1..2_048)
+            samples in prop::collection::vec(prop_oneof![
+                Just(-0.0_f32), Just(f32::MIN_POSITIVE), Just(f32::MAX),
+                any::<f32>().prop_filter("finite PCM", |value| value.is_finite()),
+            ], 1..2_048)
         ) {
             let output = resample(&samples, OUTPUT_SAMPLE_RATE).expect("valid PCM is accepted");
 
@@ -105,6 +108,22 @@ mod tests {
 
             prop_assert_eq!(output.len(), expected_length);
             prop_assert!(output.iter().all(|sample| sample.is_finite()));
+        }
+
+        #[test]
+        fn silence_is_preserved_around_resampling_chunk_boundaries(
+            frames in prop_oneof![
+                prop::sample::select(vec![1_usize, 63, 64, 65, 4095, 4096, 4097, 8191, 8192, 8193]),
+                1_usize..10_000,
+            ],
+        ) {
+            let samples = vec![0.0; frames];
+            for input_rate in [8_000, 16_000, 22_050, 32_000, 44_100, 48_000] {
+                let output = resample(&samples, input_rate).expect("silence at a supported rate");
+                let expected = (frames * 16_000).div_ceil(usize::try_from(input_rate).expect("sample rate fits"));
+                prop_assert_eq!(output.len(), expected);
+                prop_assert!(output.iter().all(|sample| sample.abs() <= f32::EPSILON));
+            }
         }
     }
 }
