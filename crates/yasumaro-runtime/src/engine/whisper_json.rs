@@ -63,6 +63,45 @@ mod tests {
 
     use super::parse_whisper_json;
 
+    fn timestamp() -> impl Strategy<Value = u64> {
+        prop_oneof![
+            Just(0),
+            Just(1),
+            Just(u64::MAX),
+            Just(u64::MAX - 1),
+            any::<u64>()
+        ]
+    }
+
+    fn segment_values() -> impl Strategy<Value = Vec<(u64, u64, String)>> {
+        proptest::collection::vec(
+            (
+                timestamp(),
+                timestamp(),
+                proptest::collection::vec(any::<char>(), 0..64),
+            ),
+            0..16,
+        )
+        .prop_map(|values| {
+            values
+                .into_iter()
+                .map(|(start, duration, text)| {
+                    (
+                        start,
+                        start.saturating_add(duration),
+                        text.into_iter().collect(),
+                    )
+                })
+                .collect()
+        })
+    }
+
+    fn document(values: &[(u64, u64, String)]) -> serde_json::Value {
+        serde_json::json!({"transcription": values.iter().map(|(start, end, text)| {
+            serde_json::json!({"offsets": {"from": start, "to": end}, "text": text})
+        }).collect::<Vec<_>>()})
+    }
+
     #[test]
     fn parses_fixed_whisper_cli_fixture_into_half_open_milliseconds() {
         let segments =
@@ -116,24 +155,9 @@ mod tests {
     proptest! {
         #[test]
         fn valid_segments_preserve_order_and_text(
-            starts_and_lengths in proptest::collection::vec((0_u32..1_000_000, 0_u16..10_000), 0..32),
-            texts in proptest::collection::vec(".*", 0..32),
+            expected in segment_values(),
         ) {
-            let count = starts_and_lengths.len().min(texts.len());
-            let values = starts_and_lengths.into_iter().zip(texts).take(count)
-                .map(|((start, length), text)| serde_json::json!({
-                    "offsets": {"from": start, "to": u64::from(start) + u64::from(length)},
-                    "text": text,
-                }))
-                .collect::<Vec<_>>();
-            let expected = values.iter().map(|value| {
-                (
-                    value["offsets"]["from"].as_u64().expect("generated integer"),
-                    value["offsets"]["to"].as_u64().expect("generated integer"),
-                    value["text"].as_str().expect("generated string").to_owned(),
-                )
-            }).collect::<Vec<_>>();
-            let bytes = serde_json::to_vec(&serde_json::json!({"transcription": values}))
+            let bytes = serde_json::to_vec(&document(&expected))
                 .expect("generated JSON serializes");
 
             let parsed = parse_whisper_json(&bytes).expect("generated segments are valid");
@@ -143,6 +167,57 @@ mod tests {
                 segment.text,
             )).collect::<Vec<_>>();
             prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn unknown_fields_at_every_level_do_not_change_segments(
+            values in segment_values(),
+            extra in proptest::collection::vec(any::<char>(), 0..64),
+        ) {
+            let mut value = document(&values);
+            let baseline = parse_whisper_json(&serde_json::to_vec(&value).expect("JSON serializes"))
+                .expect("generated document is valid");
+            let extra = serde_json::json!({"nested": [extra.into_iter().collect::<String>(), null, 42]});
+            value["future"] = extra.clone();
+            for segment in value["transcription"].as_array_mut().expect("array") {
+                segment["future"] = extra.clone();
+                segment["offsets"]["future"] = extra.clone();
+            }
+            let actual = parse_whisper_json(&serde_json::to_vec(&value).expect("JSON serializes"))
+                .expect("unknown fields are accepted");
+            prop_assert_eq!(actual, baseline);
+        }
+
+        #[test]
+        fn one_invalid_segment_rejects_the_entire_document(
+            values in segment_values(),
+            position in any::<usize>(),
+            magnitude in 1_u64..=u64::MAX,
+        ) {
+            let negative = format!("-{magnitude}");
+            let overflow = (u128::from(u64::MAX) + u128::from(magnitude)).to_string();
+            let reversed = format!(r#"{{"offsets":{{"from":{magnitude},"to":0}},"text":"x"}}"#);
+            // Test every invalid numeric/type/missing-field class on every case,
+            // at a generated position among otherwise-valid segments.
+            let invalid = [
+                format!(r#"{{"offsets":{{"from":{negative},"to":1}},"text":"x"}}"#),
+                format!(r#"{{"offsets":{{"from":0,"to":{overflow}}},"text":"x"}}"#),
+                reversed,
+                r#"{"offsets":{"from":0.5,"to":1},"text":"x"}"#.into(),
+                r#"{"offsets":{"from":0,"to":1.5},"text":"x"}"#.into(),
+                r#"{"offsets":{"from":"0","to":1},"text":"x"}"#.into(),
+                r#"{"offsets":{"from":null,"to":1},"text":"x"}"#.into(),
+                r#"{"offsets":{"to":1},"text":"x"}"#.into(),
+                r#"{"offsets":{"from":0,"to":1}}"#.into(),
+            ];
+            for bad_segment in invalid {
+                let mut value = document(&values);
+                value["transcription"].as_array_mut().expect("array").insert(
+                    position % (values.len() + 1),
+                    serde_json::from_str(&bad_segment).expect("syntactically valid JSON"),
+                );
+                prop_assert!(parse_whisper_json(&serde_json::to_vec(&value).expect("JSON serializes")).is_err());
+            }
         }
 
         #[test]

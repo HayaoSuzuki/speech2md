@@ -8,8 +8,11 @@ edition = "2024"
 cargo-fuzz = true
 
 [dependencies]
+arbitrary = { version = "1", features = ["derive"] }
+hound = "3"
 libfuzzer-sys = "0.4"
 pulldown-cmark = "0.13"
+serde_json = "1"
 yasumaro-core = { path = "../crates/yasumaro-core" }
 yasumaro-formats = { path = "../crates/yasumaro-formats" }
 yasumaro-runtime = { path = "../crates/yasumaro-runtime" }
@@ -39,6 +42,27 @@ bench = false
 [[bin]]
 name = "assign_speakers"
 path = "fuzz_targets/assign_speakers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "whisper_json_structured"
+path = "fuzz_targets/whisper_json_structured.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decode_wav"
+path = "fuzz_targets/decode_wav.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "normalize_utterances"
+path = "fuzz_targets/normalize_utterances.rs"
 test = false
 doc = false
 bench = false

@@ -2,6 +2,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use proptest::prelude::*;
 use tempfile::TempDir;
 use yasumaro_runtime::{RuntimeError, decode_to_pcm};
 
@@ -123,4 +124,55 @@ fn emits_decode_lifecycle_without_exposing_the_input_path() {
     assert!(output.contains("audio decode completed"));
     assert!(!output.contains("tone.wav"));
     assert!(!output.contains("yasumaro-runtime"));
+}
+
+fn pcm_frames() -> impl Strategy<Value = Vec<(i16, i16)>> {
+    prop_oneof![
+        prop::sample::select(vec![1_usize, 63, 64, 65, 4095, 4096, 4097]),
+        1_usize..5000,
+    ]
+    .prop_flat_map(|length| prop::collection::vec((any::<i16>(), any::<i16>()), length))
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+
+    #[test]
+    fn generated_integer_wav_preserves_frame_count_and_mono_samples(
+        frames in pcm_frames(),
+        stereo in any::<bool>(),
+        rate in prop::sample::select(vec![8_000_u32, 16_000, 22_050, 32_000, 44_100, 48_000]),
+    ) {
+        let root = TempDir::new().expect("temporary audio directory");
+        let path = root.path().join("generated.wav");
+        // Every generated waveform exercises exact sample preservation as well
+        // as the selected rate's length and finite-output contracts.
+        for sample_rate in [16_000, rate] {
+        let mut writer = hound::WavWriter::create(&path, hound::WavSpec {
+            channels: if stereo { 2 } else { 1 }, sample_rate, bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        }).expect("create generated WAV");
+        for &(left, right) in &frames {
+            writer.write_sample(left).expect("write left channel");
+            if stereo {
+                writer.write_sample(right).expect("write right channel");
+            }
+        }
+        writer.finalize().expect("finalize WAV");
+        let pcm = decode_to_pcm(&path, root.path()).expect("valid generated WAV");
+        let expected_length = (frames.len() * 16_000).div_ceil(usize::try_from(sample_rate).expect("sample rate fits"));
+        prop_assert_eq!(pcm.samples().len(), expected_length);
+        prop_assert!(pcm.samples().iter().all(|sample| sample.is_finite()));
+        if sample_rate == 16_000 {
+            for (&(left, right), actual) in frames.iter().zip(pcm.samples()) {
+                let expected = if stereo {
+                    (f32::from(left) + f32::from(right)) / 65_536.0
+                } else {
+                    f32::from(left) / 32_768.0
+                };
+                prop_assert_eq!(actual.to_bits(), expected.to_bits());
+            }
+        }
+        }
+    }
 }
