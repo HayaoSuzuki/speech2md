@@ -48,7 +48,7 @@ cargo test --workspace --all-features --locked
 cargo +nightly test --workspace --all-features --locked -- -Z unstable-options --shuffle --test-threads=1
 ```
 
-話者割り当てのfuzz targetは、時刻付きトークンと話者区間の任意の組み合わせに対し、本文が欠落せず時刻順に保たれることを検査します。
+話者割り当てのfuzz targetは、複数セグメント、トークンの有無、長さ0の区間、`u64`上限付近の時刻、可変の重複閾値を生成します。本文・話者ID・区間の保持と、話者区間の入力順に結果が依存しないことを検査します。セグメント間の順序は入力順、セグメント内のトークンは時刻順です。
 
 ```console
 cargo +nightly fuzz run assign_speakers
@@ -61,16 +61,49 @@ runtimeとCLIでは、ネイティブエンジン、OSエラー、プロセス�
 
 ## Fuzzing
 
-[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz)で音声デコーダー境界、CommonMarkレンダラー、Whisper JSON解析、話者割り当てを検査します。
-通常のpre-commitとPRのCIには含めません。GitHub Actionsでは、手動実行の`heavy.yml`でfuzz targetのコンパイルを検査します。
+[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz)で次の7 targetを検査します。
+
+| Target | 入力と検査内容 |
+|---|---|
+| `decode_audio` | 任意のファイル内容。異常終了と、成功時のPCM出力の基本条件を検査 |
+| `decode_wav` | 6種類のサンプルレート・mono/stereoの整数WAVを生成。変換後の長さ、有限値、16 kHz時のサンプル値、無音の保持を検査 |
+| `whisper_json` | 任意のバイト列。成功時の区間の妥当性と、JSONへの再変換後の解析結果の一致を検査 |
+| `whisper_json_structured` | 正常なJSONを生成し、本文・時刻・件数の保持、未知フィールドの許容、不正な区間を含む文書の拒否を検査 |
+| `assign_speakers` | 本文と話者IDを、実装の重複計算・閾値判定関数を使わず計算した期待値と照合 |
+| `render_commonmark` | 発話数・時刻・話者ID・本文を変化させ、許可した構造だけが生成されることと表示文字の保持を検査 |
+| `normalize_utterances` | マージ・重複除去・未知話者・Unicode文字数上限・時刻順を検査。一意な本文では保持と冪等性も検査 |
+
+CommonMarkの表示文字比較では、空白と改行を除外し、NULを置換文字として扱います。空白の完全な往復一致を保証する検査ではありません。任意の音声ファイルは浮動小数点のNaNやInfinityを含む場合があるため、有限値の検査は整数WAVを生成する`decode_wav`で行います。
+
+通常のpre-commitとPRのCIには含めません。GitHub Actionsの[`fuzz.yml`](../.github/workflows/fuzz.yml)は毎日と手動実行で全targetを実行します。定期実行は各60秒、手動実行は各30・60・300秒から選択できます。探索したcorpusはブランチ別のcacheに保存し、クラッシュ・タイムアウトなどの再現入力はartifactへ14日間保存します。既存の`heavy.yml`のコンパイル確認も利用できます。
 
 ```console
 rustup toolchain install nightly
 cargo +stable install cargo-fuzz --version 0.13.2 --locked
 cargo +nightly fuzz check
-cargo +nightly fuzz run decode_audio fuzz/corpus/decode_audio crates/yasumaro-runtime/tests/fixtures -- -max_total_time=60 -max_len=1048576
-cargo +nightly fuzz run render_commonmark -- -max_total_time=60 -max_len=65536
+python scripts/fuzz.py --seconds 60
 ```
+
+`scripts/fuzz.py`はPython 3.11以降を使います。管理対象の自作音声fixtureとスクリプト内の人工データからseedを生成するため、空のcheckoutでも解析・デコードの成功経路から探索を開始できます。構造化入力のseedは`arbitrary` 1.4の形式を使うため、依存を更新する際には再生も確認します。各入力のタイムアウトは10秒、メモリ上限は2 GiB、入力サイズ上限は`decode_audio`が1 MiB、それ以外が64 KiBです。構造化targetでは配列や文字列の処理量も制限しています。
+
+```console
+# 単一targetを実行
+python scripts/fuzz.py --target assign_speakers --seconds 60
+# seedを生成し、既存corpusを変異なしで再生
+python scripts/fuzz.py --replay
+# fuzz crateはworkspace外なので別途整形・lintを確認
+cargo fmt --manifest-path fuzz/Cargo.toml --check
+cargo clippy --manifest-path fuzz/Cargo.toml --all-targets --locked -- -D warnings
+```
+
+失敗入力を再現し、最小化する例です。`<artifact>`には実際に保存された入力ファイルのパスを指定します。
+
+```console
+cargo +nightly fuzz run assign_speakers <artifact>
+cargo +nightly fuzz tmin assign_speakers <artifact>
+```
+
+修正時には最小化した入力を通常の回帰テスト、またはseed生成スクリプトの人工データとして残します。利用者の音声やSRV-DBのデータをcorpusに追加しないでください。CIがcache・artifactへ保存するのは、管理対象のfixtureと人工データから生成した入力だけです。
 
 WindowsではVisual StudioのMSVC C++ x64/x86ビルドツール、C++ AddressSanitizer、Windows 11 SDKが必要です。
 「x64 Native Tools Command Prompt」で`where link`を実行し、使用するVisual Studioの`Hostx64\x64`以下にあるリンカーが先頭に表示されることを確認してください。
@@ -93,7 +126,7 @@ WindowsではVisual StudioのMSVC C++ x64/x86ビルドツール、C++ AddressSan
 workspaceテストとリリーススクリプトのテストは上表へ移してあるため、通常CIとの重複はありません。
 正式版には採番したバージョンとReleaseのURLを埋め込む必要があるため、マージ後にもビルドします。新しく生成したエンジンの実推論・キャンセル、CLIの展開後の起動、チェックサムはその成果物に対して検証します。
 
-[`heavy.yml`](../.github/workflows/heavy.yml)のfuzz targetのコンパイルとworkspace全体のカバレッジ計測は、引き続き手動実行です。
+[`fuzz.yml`](../.github/workflows/fuzz.yml)は定期・手動のfuzzing実行を担当します。[`heavy.yml`](../.github/workflows/heavy.yml)のfuzz targetのコンパイルとworkspace全体のカバレッジ計測は、引き続き手動実行です。
 
 ## SRV-DBの利用範囲
 

@@ -2026,8 +2026,11 @@ dependencies = [
 name = "yasumaro-fuzz"
 version = "0.0.0"
 dependencies = [
+ "arbitrary",
+ "hound",
  "libfuzzer-sys",
  "pulldown-cmark",
+ "serde_json",
  "tempfile",
  "yasumaro-core",
  "yasumaro-formats",
