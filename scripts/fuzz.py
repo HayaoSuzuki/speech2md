@@ -37,6 +37,19 @@ def prepare_seeds():
     for name in ("tone.wav", "tone.mp3", "tone.m4a", "silent.wav", "no-audio.mp4"):
         seed("decode_audio", name, (fixtures / name).read_bytes())
     seed("decode_audio", "empty", b"")
+    # An MP4 whose stts atom declares far more entries than it holds. This shape
+    # made symphonia read past the atom and overflow its duration accumulation.
+    mp4 = (fixtures / "no-audio.mp4").read_bytes()
+    count = mp4.index(b"stts") + 8
+    oversized = mp4[:count] + struct.pack(">I", 5373953) + mp4[count + 4:]
+    seed("decode_audio", "stts-entry-count", oversized)
+    # The same file behind another atom, because symphonia searches its whole probe
+    # window for the ftyp marker instead of requiring it at the start.
+    seed("decode_audio", "stts-entry-count-prefixed", struct.pack(">I", 8) + b"free" + oversized)
+    # Probe::format also consumes leading metadata and resumes looking for a
+    # container. Use a valid ID3v2.4 tag with one frame-sized padding block.
+    id3 = b"ID3\x04\0\0\0\0\0\x0a" + bytes(10)
+    seed("decode_audio", "stts-entry-count-after-id3", id3 + oversized)
     seed("whisper_json", "fixture", (fixtures / "whisper-output.json").read_bytes())
     for name, start, end in (("zero", 0, 0), ("max", 2**64 - 1, 2**64 - 1),
                              ("negative", -1, 1), ("reversed", 1, 0),

@@ -96,6 +96,186 @@ fn rejects_a_container_without_an_audio_stream() {
     assert!(matches!(result, Err(RuntimeError::NoAudioStream)));
 }
 
+/// Replace the entry count of the single `stts` atom in an ISO-BMFF fixture.
+fn with_stts_entry_count(name: &str, entry_count: u32) -> Vec<u8> {
+    let mut bytes = std::fs::read(fixture(name)).expect("read fixture");
+    let start = bytes
+        .windows(4)
+        .position(|window| window == b"stts")
+        .expect("fixture has a time-to-sample atom");
+    // The count follows the atom type and the version and flags field.
+    let count = start + 8;
+    bytes[count..count + 4].copy_from_slice(&entry_count.to_be_bytes());
+    bytes
+}
+
+/// Prefix an atom that pushes the `ftyp` marker away from the start of the file.
+fn with_leading_atom(bytes: &[u8]) -> Vec<u8> {
+    let mut prefixed = 8_u32.to_be_bytes().to_vec();
+    prefixed.extend_from_slice(b"free");
+    prefixed.extend_from_slice(bytes);
+    prefixed
+}
+
+/// Prefix a valid ID3v2.4 tag containing one frame-sized padding block.
+fn with_leading_id3(bytes: &[u8]) -> Vec<u8> {
+    let mut prefixed = b"ID3\x04\0\0\0\0\0\x0a".to_vec();
+    prefixed.extend_from_slice(&[0; 10]);
+    prefixed.extend_from_slice(bytes);
+    prefixed
+}
+
+#[test]
+fn rejects_an_mp4_sample_table_that_reaches_past_its_atom() {
+    // Fuzzing `decode_audio` mutated the entry count of a one-entry `stts` atom,
+    // which made symphonia 0.5.5 read the atoms that follow it and overflow the
+    // `u64` duration it accumulates. Such input must stay a probing error.
+    let temp_root = TempDir::new().expect("temporary root");
+    for name in ["no-audio.mp4", "tone.m4a"] {
+        let input = temp_root.path().join(name);
+        std::fs::write(&input, with_stts_entry_count(name, 5_373_953)).expect("write input");
+        // Symphonia searches its whole probe window for the marker, so the same
+        // tables are reachable when another atom comes first.
+        let prefixed = temp_root.path().join(format!("prefixed-{name}"));
+        std::fs::write(
+            &prefixed,
+            with_leading_atom(&with_stts_entry_count(name, 5_373_953)),
+        )
+        .expect("write prefixed input");
+        let after_id3 = temp_root.path().join(format!("id3-{name}"));
+        std::fs::write(
+            &after_id3,
+            with_leading_id3(&with_stts_entry_count(name, 5_373_953)),
+        )
+        .expect("write ID3-prefixed input");
+
+        for input in [&input, &prefixed, &after_id3] {
+            let error = decode_to_pcm(input, temp_root.path())
+                .map(|_| ())
+                .expect_err("a sample table beyond its atom");
+
+            assert!(
+                matches!(&error, RuntimeError::Probe(_)),
+                "unexpected error for {}: {error}",
+                input.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn rejects_an_mp4_child_that_crosses_its_parent_boundary() {
+    fn atom(kind: [u8; 4], payload: &[u8]) -> Vec<u8> {
+        let size = u32::try_from(payload.len() + 8).expect("test atom fits in u32");
+        let mut bytes = size.to_be_bytes().to_vec();
+        bytes.extend_from_slice(&kind);
+        bytes.extend_from_slice(payload);
+        bytes
+    }
+
+    let mut stts_payload = vec![0, 0, 0, 0];
+    stts_payload.extend_from_slice(&2_u32.to_be_bytes());
+    for _ in 0..2 {
+        stts_payload.extend_from_slice(&u32::MAX.to_be_bytes());
+        stts_payload.extend_from_slice(&u32::MAX.to_be_bytes());
+    }
+    let stts = atom(*b"stts", &stts_payload);
+    let minf = atom(*b"minf", &atom(*b"stbl", &stts));
+    let hidden = atom(*b"trak", &atom(*b"mdia", &minf));
+    let mut malformed_moov = 9_u32.to_be_bytes().to_vec();
+    malformed_moov.extend_from_slice(b"moov");
+    malformed_moov.extend(hidden);
+    let mut bytes = atom(*b"ftyp", b"isom\0\0\x02\0isom");
+    bytes.extend(malformed_moov);
+
+    let temp_root = TempDir::new().expect("temporary root");
+    let input = temp_root.path().join("crossed-parent.mp4");
+    std::fs::write(&input, bytes).expect("write input");
+
+    let error = decode_to_pcm(&input, temp_root.path())
+        .map(|_| ())
+        .expect_err("a child atom outside its parent must not decode");
+
+    assert!(
+        matches!(error, RuntimeError::Probe(_)),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn keeps_decoding_an_mp4_whose_sample_table_is_intact() {
+    let temp_root = TempDir::new().expect("temporary root");
+    let input = temp_root.path().join("tone.m4a");
+    std::fs::write(&input, with_stts_entry_count("tone.m4a", 2)).expect("write input");
+
+    let decoded = decode_to_pcm(&input, temp_root.path()).expect("unchanged sample table");
+
+    assert_eq!(decoded.sample_rate(), 16_000);
+}
+
+#[test]
+fn decodes_a_wav_whose_samples_spell_mp4_atoms() {
+    // The probe selects the WAV demuxer on the leading `RIFF` marker, so samples
+    // that happen to spell an `ftyp` atom and an oversized `stts` stay audio.
+    let atoms: [u8; 24] = [
+        0, 0, 0, 8, b'f', b't', b'y', b'p', 0, 0, 0, 16, b's', b't', b't', b's', 0, 0, 0, 0, 0, 0,
+        0, 1,
+    ];
+    let samples = atoms
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|bytes| i16::from_le_bytes(*bytes))
+        .collect::<Vec<_>>();
+    let temp_root = TempDir::new().expect("temporary root");
+    let input = temp_root.path().join("atom-shaped.wav");
+    let mut writer = hound::WavWriter::create(
+        &input,
+        hound::WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        },
+    )
+    .expect("create WAV");
+    for sample in &samples {
+        writer.write_sample(*sample).expect("write sample");
+    }
+    writer.finalize().expect("finalize WAV");
+
+    let decoded = decode_to_pcm(&input, temp_root.path()).expect("valid WAV with atom-shaped PCM");
+
+    assert_eq!(decoded.samples().len(), samples.len());
+}
+
+#[cfg(unix)]
+#[test]
+fn decodes_an_input_that_cannot_seek() {
+    // A FIFO reaches the decoder without seeking, so it is spooled before the
+    // sample tables are checked.
+    let temp_root = TempDir::new().expect("temporary root");
+    let input = temp_root.path().join("input.fifo");
+    let status = std::process::Command::new("mkfifo")
+        .arg(&input)
+        .status()
+        .expect("run mkfifo");
+    assert!(status.success(), "mkfifo failed");
+    let audio = std::fs::read(fixture("tone.wav")).expect("read fixture");
+    let writer = {
+        let path = input.clone();
+        std::thread::spawn(move || {
+            std::fs::write(&path, &audio).expect("write into the FIFO");
+        })
+    };
+
+    let decoded = decode_to_pcm(&input, temp_root.path()).expect("decode a FIFO");
+
+    writer.join().expect("writer thread");
+    assert_eq!(decoded.sample_rate(), 16_000);
+    assert!(!decoded.samples().is_empty());
+}
+
 #[test]
 fn preserves_silence_as_nonempty_pcm() {
     let temp_root = TempDir::new().expect("temporary root");

@@ -105,7 +105,9 @@ cargo +nightly fuzz check
 python scripts/fuzz.py --seconds 60
 ```
 
-`scripts/fuzz.py`はPython 3.11以降を使います。管理対象の自作音声fixtureとスクリプト内の人工データからseedを生成するため、空のcheckoutでも解析・デコードの成功経路から探索を開始できます。構造化入力のseedは`arbitrary` 1.4の形式を使うため、依存を更新する際には再生も確認します。各入力のタイムアウトは10秒、メモリ上限は2 GiB、入力サイズ上限は`decode_audio`が1 MiB、それ以外が64 KiBです。構造化targetでは配列や文字列の処理量も制限しています。
+`scripts/fuzz.py`はPython 3.11以降を使います。管理対象の自作音声fixtureとスクリプト内の人工データからseedを生成するため、空のcheckoutでも解析・デコードの成功経路から探索を開始できます。構造化入力のseedは`arbitrary` 1.4の形式を使うため、依存を更新する際には再生も確認します。`decode_audio`のseedには、`stts`のentry countを実際の大きさより膨らませたMP4も含めます。各入力のタイムアウトは10秒、メモリ上限は2 GiB、入力サイズ上限は`decode_audio`が1 MiB、それ以外が64 KiBです。構造化targetでは配列や文字列の処理量も制限しています。
+
+音声統合テストは、先頭に別のatomまたはID3メタデータがあるMP4、親atomの境界を越える子atom、atomに見えるPCMを含むWAV、FIFOからの入力を対象にしています。`cargo test -p yasumaro-runtime --test audio`で実行できます。
 
 ```console
 # 単一targetを実行
