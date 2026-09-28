@@ -395,3 +395,35 @@ final存在はregular file、検証状態は`ModelStore::acquire`、partial存�
 指摘: 初稿の状態観測は`ModelStore::acquire(...).is_ok()`で予期しないlock/storage errorまで未検証状態へ丸め、writerを常にfalseと仮定していた。また厳格ClippyはLean schemaのBool数、複雑な環境tuple、regular-file判定、標準出力を指摘した。
 
 修正: manifest不一致と基盤errorを分離し、readerなしcaseはpublicなremoveの成否でwriter解放を観測する。環境tupleは専用structへ変更し、regular-file判定とLean schema・oracle出力だけに理由付きallowを限定した。strictは単独実行と5回連続実行ですべて6件match、reportは7件すべてmatchとなった。
+
+## CI、文書、全体検証
+
+### 第1巡: 要件レビュー
+
+Issue #5から承認後に確定した要件を、基点`de0ec73`以降のcommitへ対応づけた。`b3a8082`と`b06a492`が非待機の`model remove`、`7296474`がoffset 0からの取得と通常失敗時cleanup、`969b780`と`373bbd4`が使用中モデルのleaseと検証、`ec18a3f`がキャンセルを含むLean状態機械、`369865d`と`dc35fa5`がLean生成fixtureとRust oracle、`d0e8af8`がネットワーク待機中のキャンセルを実装する。再開用のRange、validator、sidecar、backup、永続offsetは追加していない。testとoracle内の`resume`という局所名は、停止させたtest threadを再開するchannelであり、download再開処理ではない。
+
+READMEは削除、通常失敗時cleanup、強制終了後の次回cleanup、25ミリ秒間隔のネットワーク待機監視、公開許可前後の競合規則を説明する。Issue本文とコメントは変更していない。
+
+指摘: 公開許可前のキャンセルを常に`.part`削除と終了コード130になると記載すると、cleanup自体も失敗した経路を説明できない。
+
+修正: `.part`削除に成功した場合は130、削除にも失敗した場合はストレージエラーになると明記した。
+
+### 第2巡: 状態・安全性レビュー
+
+Leanの`Safe`は、確定モデルの検証、検証済みpartialの存在、公開許可時の検証済みpartialとwriter保持、readerとwriterの排他を表す。fixtureの7 caseはLeanの`run`から期待状態を生成し、Rust oracleは6件のproduction対応caseを公開APIとtest-support checkpointで観測する。壊れた許可遷移の1件は検出感度だけに使い、production対応として数えない。
+
+対応表は、未検証公開、公開許可前後のキャンセル、busy remove、remove成功を個別のRust testとoracle caseへ結びつける。Leanが扱わないSHA-256計算、rename、unlink、symlink、OS lock、強制終了時cleanupはRust統合testと各OSのCIへ割り当てた。oracleは抽象状態との対応を検査するが、Rust実装全体の形式証明ではないことを文書に明記した。
+
+指摘: `lake -d formal`はrepository rootのcwdを維持する一方、workflowの`working-directory: formal`はcwdを変更する。同じfixtureへの相対pathを一つに統一すると、どちらかが失敗する。
+
+修正: rootから実行する開発文書では`crates/...`、`formal`内で実行するworkflowとformal READMEでは`../crates/...`を使用した。両方のfreshness commandが同じfixtureを検査することを実行確認した。
+
+### 第3巡: 実装品質レビュー
+
+formal workflowはRust 1.98.1を設定し、Lean build、Lean実行test、fixture freshness、oracle単体test、strict対応検査を直列実行する。依存解決を固定するため、Rustのtestとrunには`--locked`を指定した。YAML検査、Rustfmt、全target・全featureの厳格Clippy、workspace全test、Lean buildと実行test、fixture freshness、oracle単体testとstrict実行、`git diff --check`を最終検証項目とした。
+
+指摘: workflowのoracle testには`--locked`があったが、続くstrict実行にはなく、CI中にlockfileとの差を許す指定になっていた。
+
+修正: strict実行にも`--locked`を追加した。
+
+ローカルのworkspace testは失敗0件で、実model、ローカル音声、外部corpusを必要とする5件だけがignoredだった。macOSでの検証結果であり、WindowsとLinuxのlock、rename、directory symlink分岐、SIGKILL時点のdurability、disk-full、permission、実native inferenceは未実行である。branchをremoteへ送っていないためGitHub Actionsも未実行であり、ローカル成功として扱っていない。

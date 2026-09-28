@@ -42,11 +42,15 @@ Leanで次の性質を検査しています。
 
 ### モデルライフサイクル
 
-`ModelLifecycle.lean`は、検証済みの確定モデル、部分ファイル、共有reader数、排他writerの状態遷移を定義します。`publishVerified`は、Rust実装が行うサイズ・SHA-256検証とrenameを一つにまとめた抽象イベントです。Leanがハッシュ計算やrenameの成否を検証するわけではありません。
+`ModelLifecycle.lean`は、確定モデルと部分ファイルの検証状態、公開許可、キャンセル要求、共有reader数、排他writerを状態として定義します。検証、キャンセル要求、公開許可、公開は別のeventです。公開許可には、検証済みの部分ファイル、writerの保持、キャンセル要求がないことを要求します。
 
 `ModelLifecycleProofs.lean`は、次の性質を任意の安全な状態について証明します。
 
 - 確定モデルが存在するなら、全体検証済みである
+- 検証済みの部分ファイルが存在するなら、部分ファイルも存在する
+- 公開許可があるなら、部分ファイルは検証済みでwriterが存在する
+- 未検証の部分ファイルと公開許可前にキャンセルされた部分ファイルは公開されない
+- 公開許可後のキャンセルは許可を取り消さない
 - writerが存在するなら、readerは存在しない
 - cleanup成功後に部分ファイルは存在しない
 - cleanup失敗は既存の確定モデルと検証状態を変更しない
@@ -54,7 +58,9 @@ Leanで次の性質を検査しています。
 - remove成功後は確定モデルと部分ファイルが存在しない
 - removeを繰り返しても結果は変わらない
 
-ファイル削除、symlink、rename、OSのファイルロックはRustの統合テストで検査します。Leanの定理は、Rust実装そのものを証明するものではありません。
+壊れた公開許可遷移には、未検証かつキャンセル済みの部分ファイルを許可する固定witnessを置いています。正常遷移が安全条件を保ち、壊れた遷移が安全条件を破ることを同じ定理で検査します。
+
+Leanは抽象状態の遷移を証明します。SHA-256の計算、ファイル削除、symlink、rename、OSのファイルロックはRustの統合テストで検査します。
 
 ## Rustテスト用JSON
 
@@ -80,3 +86,25 @@ Pop-Location
 
 Rustの統合テストは、このJSONを読み込んでLeanモデルとRust実装の結果を比較します。
 Leanの証明はLeanモデルの性質を保証しますが、Rust実装、ネイティブライブラリ、OSの挙動まで保証するものではありません。
+
+### モデルライフサイクルfixture
+
+モデルライフサイクル用のgeneratorは、schema version 1の7 caseをJSONへ出力します。
+
+```powershell
+lake exe model-lifecycle-testgen
+lake exe model-lifecycle-testgen -- --output ..\crates\yasumaro-runtime\tests\fixtures\lean-model-lifecycle.json
+lake exe model-lifecycle-testgen -- --check ..\crates\yasumaro-runtime\tests\fixtures\lean-model-lifecycle.json
+```
+
+`--check`は生成結果とコミット済みfixtureが異なる場合にexit 1、不正な引数にexit 2を返します。fixtureの`expected`はLeanの`run`から生成し、Rust側では書き直しません。
+
+Rust oracleはリポジトリルートから実行します。
+
+```console
+cargo test -p yasumaro-runtime --example model_lifecycle_oracle --features test-support --locked
+cargo run -p yasumaro-runtime --example model_lifecycle_oracle --features test-support -- --strict
+cargo run -p yasumaro-runtime --example model_lifecycle_oracle --features test-support -- --case cancel-before-authorization
+```
+
+`strict`は通常の公開・検証・removeを扱い、`internal-fixture`は公開許可前後の同期点を使います。`model-only`は壊れたLean遷移の検出能力だけを確認します。oracleは公開APIを通じてfinal、partial、結果分類、leaseとlock解放を観測します。

@@ -46,6 +46,15 @@ Pythonスクリプトには構文とデバッガーの消し忘れ検査を適�
 通常テスト、シャッフルテスト、カバレッジ、Fuzzing、実モデルによる評価は[テストと外部評価](testing.md)を参照してください。
 同文書にGitHub Actionsの分担と、VOICEPEAK・SRV-DBを用いた評価方法も記載しています。
 
+モデルライフサイクルを変更した場合は、Lean fixtureのfreshnessとRust oracleも確認します。
+
+```console
+lake -d formal exe model-lifecycle-testgen -- --check crates/yasumaro-runtime/tests/fixtures/lean-model-lifecycle.json
+cargo test -p yasumaro-runtime --example model_lifecycle_oracle --features test-support --locked
+cargo run -p yasumaro-runtime --example model_lifecycle_oracle --features test-support -- --strict
+cargo run -p yasumaro-runtime --example model_lifecycle_oracle --features test-support -- --case cancel-before-authorization
+```
+
 ## 配布ファイルの生成
 
 Linux／macOSでは、対象のOSとCPU上で次のコマンドを実行します。Rustに加えてPython 3.12以降が必要です。
@@ -98,6 +107,8 @@ PRの作成・更新と手動実行では、同じビルド処理を公開なし
 - [実装計画](superpowers/plans/2026-09-25-yasumaro-implementation.md)
 - [モデル削除と失敗時クリーンアップの設計](superpowers/specs/2026-09-28-model-remove-clean-install-design.md)
 - [モデル削除と失敗時クリーンアップの実装計画](superpowers/plans/2026-09-28-model-remove-clean-install.md)
+- [キャンセル可能なモデル公開の設計改訂](superpowers/specs/2026-09-28-model-remove-clean-install-design.md#キャンセルと強制終了)
+- [キャンセル境界と形式対応の実装計画](superpowers/plans/2026-09-28-model-cancellation-formal-correspondence.md)
 - [Leanによる話者割り当てとモデルライフサイクルの検証](../formal/README.md)
 - [whisper.cppエンジンのビルド](../engines/README.md)
 
@@ -106,6 +117,8 @@ PRの作成・更新と手動実行では、同じビルド処理を公開なし
 ```console
 lake -d formal build
 lake -d formal exe YasumaroTests
+lake -d formal exe model-lifecycle-testgen -- --check crates/yasumaro-runtime/tests/fixtures/lean-model-lifecycle.json
+cargo run -p yasumaro-runtime --example model_lifecycle_oracle --features test-support -- --strict
 ```
 
-Leanは検証済みモデル、部分ファイル、reader、writerの抽象状態を扱います。ハッシュ計算、rename、symlink、OSのfile lockはRustの統合テストで検査します。
+Leanは検証済みモデル、部分ファイル、公開許可、キャンセル要求、reader、writerの抽象状態を扱います。ハッシュ計算、rename、symlink、OSのfile lockはRustの統合テストで検査します。Rust oracleはLean生成fixtureと公開APIの観測結果を比較します。

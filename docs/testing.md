@@ -49,6 +49,17 @@ cargo test --workspace --all-features --locked
 ```console
 lake -d formal build
 lake -d formal exe YasumaroTests
+lake -d formal exe model-lifecycle-testgen -- --check crates/yasumaro-runtime/tests/fixtures/lean-model-lifecycle.json
+cargo test -p yasumaro-runtime --example model_lifecycle_oracle --features test-support --locked
+cargo run -p yasumaro-runtime --example model_lifecycle_oracle --features test-support -- --strict
+```
+
+fixture freshnessの検査では、Leanが生成したschema version 1の期待状態とコミット済みJSONを比較します。strict oracleは`strict`と`internal-fixture`の6 caseを実行し、Rust側の観測結果をfixtureの期待状態・期待結果と比較します。壊れたLean遷移だけを扱う`model-only` caseはstrict実行から除外します。
+
+1 caseを再現する場合は、case名を指定します。
+
+```console
+cargo run -p yasumaro-runtime --example model_lifecycle_oracle --features test-support -- --case cancel-before-authorization
 ```
 
 モデルライフサイクルの定理とRust側の主な検査は次のように対応します。
@@ -56,12 +67,14 @@ lake -d formal exe YasumaroTests
 | Leanの性質 | Rust側の検査 |
 |---|---|
 | 検証前のモデルを公開しない | `model_download`のsize、SHA-256、publish失敗test |
+| 公開許可前のキャンセルは公開を阻止する | `model_download`のBeforeAuthorization checkpoint testとoracleの`cancel-before-authorization` |
+| 公開許可後のキャンセルは許可を取り消さない | `model_download`のAfterAuthorization checkpoint testとoracleの`cancel-after-authorization` |
 | writerとreaderは同時に存在しない | `model_lifecycle`のlease中removeと`model_download`のlease中install待機test |
 | 通常cleanup後にpartialが存在しない | `model_download`の通信、timeout、cancel、検証失敗test |
 | busy removeは状態を変更しない | `model_lifecycle`と`model_cli`の`ModelInUse` test |
 | remove成功後はfinalとpartialが存在しない | `model_lifecycle`と`model_cli`のremove test |
 
-Leanの証明対象は抽象状態であり、SHA-256の計算、rename、unlink、symlink、OSのfile lock、強制終了時のcleanupを保証しません。これらはRustの統合テストと各OSのCIで検査します。
+Leanの証明対象は抽象状態です。SHA-256の計算、rename、unlink、symlink、OSのfile lock、強制終了時のcleanupはRustの統合テストと各OSのCIで検査します。oracleは両者の結果を対応づけますが、Rustプログラム全体を形式証明するものではありません。
 
 実行順への依存は、nightlyのシャッフル機能で検査します。
 
@@ -162,7 +175,7 @@ WindowsではVisual StudioのMSVC C++ x64/x86ビルドツール、C++ AddressSan
 |---|---|
 | [`ci.yml`](../.github/workflows/ci.yml) | Rustfmtと厳格なClippyを独立したジョブで実行 |
 | [`tests.yml`](../.github/workflows/tests.yml) | 4構成のworkspaceテスト |
-| [`formal.yml`](../.github/workflows/formal.yml) | Leanのbuild、モデルライフサイクル証明、実行テスト |
+| [`formal.yml`](../.github/workflows/formal.yml) | Leanのbuild、実行テスト、fixture freshness、Rust oracleのstrict対応検査 |
 | [`shuffled-tests.yml`](../.github/workflows/shuffled-tests.yml) | nightlyで実行順をランダム化した逐次テストを3回実行 |
 | [`coverage.yml`](../.github/workflows/coverage.yml) | coreとformatsそれぞれの行・関数カバレッジ100%を検査 |
 | [`release-automation.yml`](../.github/workflows/release-automation.yml) | タグ採番・競合・再実行・配布情報・バージョン反映のテスト |
