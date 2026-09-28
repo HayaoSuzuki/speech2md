@@ -87,3 +87,29 @@ install、remove、leaseの状態変化をTask間で追跡した。Task 2がlock
 修正2: `leanprover/lean-action@v1`を使い、`formal`をLake package directoryとしてbuildだけを実行した後、`lake exe YasumaroTests`を明示的に実行する構成へ変更した。
 
 計画書にはplaceholder、TBD、未決定の分岐がない。実装時に新しい要件が見つかった場合は計画へ無断で追加せず、承認済み設計との差として記録する。
+
+## Task 1: Leanモデルと安全性証明
+
+### 第1巡: 要件レビュー
+
+`ModelLifecycle.lean`は、確定モデルの存在と検証状態、部分ファイル、reader数、writerの5成分だけを保持する。eventはinstall開始、部分ファイル作成、検証済み公開、cleanup成否、lease取得・解放、removeに限定した。HTTP Range、validator、backup、再試行、bounded search、ライフサイクル用fixture生成は含まない。既存の`TestVectors.lean`は話者割り当て用であり、今回の状態機械には接続していない。
+
+指摘: Leanでは`partial`が予約語であり、設計書どおりのfield名をそのまま宣言できなかった。
+
+修正: fieldをescaped identifierの`«partial»`として宣言した。Leanが表示する外部名と状態成分の意味は`partial`のままである。
+
+### 第2巡: 状態・安全性レビュー
+
+`step_preserves`は全eventを場合分けし、`published = true`なら`publishedVerified = true`、`writer = true`なら`readers = 0`という二つの不変条件を保持する。`run_preserves`は任意のevent列へこの結果を拡張する。cleanup成功・失敗、busy remove、remove成功、remove冪等性は任意の`State`について個別の定理で確認した。
+
+指摘: `run_preserves`は初期状態の安全性を仮定するが、検証済みfinalと任意のpartial・reader数を持つ初期状態が`Safe`であることを接続する定理がなかった。
+
+修正: `verified_initial_safe`を追加し、partialの有無とreader数を制限せず、writerが存在しない検証済み初期状態が`Safe`であることを証明した。`YasumaroTests.lean`から定理を参照し、定理追加前の失敗と追加後の成功を確認した。
+
+### 第3巡: 実装品質レビュー
+
+各定理は固定fixtureではなく、引数で受け取った任意の状態またはevent列を扱う。`sorry`、`admit`、`native_decide`、`maxHeartbeats 0`は使用していない。`lake build`は警告なしで成功し、`lake exe YasumaroTests`は初期状態、cleanup、busy remove、remove成功、冪等性の実行例を検査する。
+
+指摘: 最初の証明では未使用のsimp引数、不要な`simpa`、deprecatedな`if_pos`による警告が出た。
+
+修正: 明示的な場合分けは維持し、簡約手順だけを整理した。READMEにはLeanが証明する抽象状態と、Rustテストで検査するハッシュ計算、rename、unlink、OS lockの境界を記載した。

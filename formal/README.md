@@ -1,7 +1,7 @@
-# Leanによる話者割り当てモデルの検証
+# Leanによる純粋モデルの検証
 
-このディレクトリは、yasumaroの純粋な話者割り当て規則をLean 4でモデル化する技術検証です。
-音声デコード、Whisper、sherpa-onnx、ファイルシステムなどのI/Oは対象に含めません。
+このディレクトリでは、yasumaroの話者割り当て規則とモデルライフサイクルをLean 4でモデル化します。
+音声デコード、Whisper、sherpa-onnx、HTTP、ファイルシステム、OSのファイルロックは対象に含めません。
 
 ## Windowsでの準備
 
@@ -29,7 +29,9 @@ lake build
 lake exe YasumaroTests
 ```
 
-現在、Leanで次の性質を検査しています。
+### 話者割り当て
+
+Leanで次の性質を検査しています。
 
 - `TimeSpan`は`startMs <= endMs`の証明を保持し、逆転した区間を`create`が拒否する
 - 重なり時間は左右を交換しても変わらない
@@ -37,6 +39,22 @@ lake exe YasumaroTests
 - 重なり時間は左側区間の長さを超えない
 - 最大重複が同率なら、小さい`SpeakerId`を選ぶ
 - 最大重複率が有理数の閾値未満なら話者を割り当てない
+
+### モデルライフサイクル
+
+`ModelLifecycle.lean`は、検証済みの確定モデル、部分ファイル、共有reader数、排他writerの状態遷移を定義します。`publishVerified`は、Rust実装が行うサイズ・SHA-256検証とrenameを一つにまとめた抽象イベントです。Leanがハッシュ計算やrenameの成否を検証するわけではありません。
+
+`ModelLifecycleProofs.lean`は、次の性質を任意の安全な状態について証明します。
+
+- 確定モデルが存在するなら、全体検証済みである
+- writerが存在するなら、readerは存在しない
+- cleanup成功後に部分ファイルは存在しない
+- cleanup失敗は既存の確定モデルと検証状態を変更しない
+- 使用中のremoveは状態を変更しない
+- remove成功後は確定モデルと部分ファイルが存在しない
+- removeを繰り返しても結果は変わらない
+
+ファイル削除、symlink、rename、OSのファイルロックはRustの統合テストで検査します。Leanの定理は、Rust実装そのものを証明するものではありません。
 
 ## Rustテスト用JSON
 
