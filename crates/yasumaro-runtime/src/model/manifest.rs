@@ -8,7 +8,7 @@ use super::ModelError;
 
 const EMBEDDED_MANIFEST: &str = include_str!("../../../../models/manifest.json");
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[serde(rename_all = "kebab-case")]
 pub enum ModelId {
     WhisperBase,

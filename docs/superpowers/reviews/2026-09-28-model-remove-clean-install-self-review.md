@@ -189,3 +189,27 @@ Whisperはchild processの起動から終了確認まで`self.model`を借用す
 `rg`で`WhisperProcessTranscriber::new`、`new_for_test`、`SherpaDiarizer::new`の全呼び出しを列挙した。いずれも`acquire`で得たleaseを渡し、bare model pathを渡す箇所は残っていない。保持専用のSherpa fieldは`_segmentation`と`_embedding`とし、native configの再設定に必要なUTF-8 path文字列とは役割を分けた。
 
 `cargo check --workspace --all-targets --all-features --locked`はignored評価testを含めて成功した。公開constructorのerror説明、import、未使用field、完全pathのerror露出に新たな不整合は見つからなかった。
+
+## Task 5: CLI remove、install cancellation、error表示
+
+### 第1巡: 要件レビュー
+
+`model remove`はClapで一つ以上のmodelを必須とする。入力を`ModelId`へ変換し、deriveした全順序でsortして重複を除き、一つずつ`ModelStore::remove`へ渡す。引数なしはexit 2となる。重複指定の成功表示は処理した一意model数を使う。
+
+removeは最初のerrorをそのまま返し、後続modelを処理しない。実fileと別processの共有leaseを使うtestで、成功したprefixを戻さず、busy modelを変更せず、後続modelも残すことを確認した。installはtranscribeと同じ`cancellation_flag`を使い、flagを`install_with_cancellation`へ渡す。要件から外れるrollback、待機remove、暗黙installは追加していない。
+
+### 第2巡: 状態・安全性レビュー
+
+入力順がmedium、small、baseでも、処理順は`ModelId`のbase、small、mediumになる。smallのleaseを保持した状態ではbaseの削除だけが確定し、smallで`ModelInUse`となり、mediumは未処理になる。重複IDはremove前に除くため、同じ状態遷移を二度実行しない。
+
+Ctrl+Cはinstallとtranscribeの双方で`Release` storeする同じ生成関数を使う。runtime側は`Acquire` loadし、installのpartial cleanup後に`Cancelled`を返す。直接の`ModelError::Cancelled`だけをexit 130とし、cleanup自体にも失敗して`CleanupFailed`となった場合はstorage/model errorのexit 4を維持する。状態遷移と終了コードの矛盾は見つからなかった。
+
+### 第3巡: 実装品質レビュー
+
+Clapが表示する`model remove <MODELS>...`と全model choiceを確認した。`ModelInUse`のhelpは対象IDを含む再実行commandと待つべき処理を示す。`CleanupFailed`は対象IDのremove、`Cancelled`は対象IDのinstallを案内する。既存のengine、output、runtime errorのexit codeとhelpは変更していない。helpはmodel IDだけを組み立て、URLや完全なlocal pathを追加しない。
+
+指摘: 親の`model --help`へremoveが掲載されることは目視確認だけで、回帰testに固定されていなかった。
+
+修正: 既存のmodel help testへremoveの掲載確認を追加した。全`ModelError`はCancelledの個別分類またはmodel errorの包括分岐で処理され、match漏れはない。
+
+検証時にClippyがmodel cancellationとruntime cancellationの同一結果を別armにした点を検出したため、両patternを一つのexit 130 armへ統合した。分類の意味は変えていない。
