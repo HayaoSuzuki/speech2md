@@ -100,6 +100,13 @@ impl ModelStore {
         }
     }
 
+    pub(super) fn lock_exclusive(&self, id: ModelId) -> Result<File, ModelError> {
+        let lock = self.open_lock(id)?;
+        lock.lock_exclusive()
+            .map_err(|error| lock_error(id, "acquire exclusive lock", &error))?;
+        Ok(lock)
+    }
+
     pub(super) fn paths(&self, id: ModelId) -> ModelPaths {
         let final_path = self.path(id);
         let mut partial_name = OsString::from(final_path.as_os_str());

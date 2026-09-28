@@ -37,6 +37,14 @@ pub enum ModelError {
     Lock { id: ModelId, message: String },
     #[error("model {id} is in use")]
     ModelInUse { id: ModelId },
+    #[error("model {id} installation was cancelled")]
+    Cancelled { id: ModelId },
+    #[error("model {id} installation failed: {source}; partial cleanup failed: {cleanup}")]
+    CleanupFailed {
+        id: ModelId,
+        source: Box<Self>,
+        cleanup: String,
+    },
     #[error("model storage operation failed: {0}")]
     Storage(String),
 }

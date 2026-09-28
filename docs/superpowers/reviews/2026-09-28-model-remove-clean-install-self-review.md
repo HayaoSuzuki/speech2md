@@ -137,3 +137,33 @@ install、remove、leaseの状態変化をTask間で追跡した。Task 2がlock
 partial pathは`OsString`へ`.part`を追加するため、非UTF-8のmodel rootを文字列へ変換しない。lockとstorage errorは操作名と`ErrorKind`だけを保持し、完全なローカルpathを含めない。publicな`acquire`、`remove`、`ModelLease::path`には契約とerror条件を記載した。Clippyの`filetype_is_file`は、symlinkと特殊fileを拒否する要件により意図的に許可し、理由を属性へ記載した。
 
 Windows targetのcross-checkは、crate本体へ到達する前にローカル環境へWindows SDK headerがないため`ring`のbuild scriptで停止した。この結果はWindows成功として扱わない。Windows固有分岐は公式の`FileTypeExt`に限定し、最終判断はWindows CIへ残す。現在のplatformでは全target・全featureのClippyとruntime testが成功した。
+
+## Task 3: Fresh downloadと失敗時cleanup
+
+### 第1巡: 要件レビュー
+
+installerはモデルごとの排他lock内でstale partialを削除し、既存finalの全体サイズとSHA-256を検証する。有効なfinalは通信せず再利用し、不正finalは通信前に削除する。取得が必要な場合は無条件GETを一度だけ送り、`create_new`で作成した決定的な`.part`へoffset 0から書く。Range、validator、sidecar、backup、retry loopは追加していない。旧`model_store.rs`のnetwork testは`model_download.rs`へ分離した。
+
+指摘1: reqwest 0.12.28のblocking builderには`read_timeout`がなく、計画のAPI名をそのまま実装できなかった。
+
+修正1: blocking responseの各`Read`を期限付きにする`ClientBuilder::timeout`へread timeout値を渡し、connect timeoutは`connect_timeout`で別に設定した。この判断と、requestの他段階も同じ期限の対象になる差をledgerへ記録した。
+
+指摘2: reqwestの既定redirect追従は、同じinstallで複数requestを発生させる。
+
+修正2: 302応答で二つ目のrequestを観測するテストを先に失敗させた。redirect policyを`none`にし、2xx以外を明示的に`Download`へ分類した後、request数が1でGREENになることを確認した。
+
+### 第2巡: 状態・安全性レビュー
+
+stale cleanup、valid final、invalid final、接続失敗、body中断、read timeout、midstream cancellation、過大応答、hash不一致、publish失敗を個別に検査した。すべての通常失敗は共通cleanup関数を通り、partialを削除する。valid finalとstale partialが併存し、stale partialが非空directoryで削除できない場合は通信せず、finalを保持する。同時installは同じ排他lockで直列化され、server requestは一度だけになる。
+
+指摘: 元のpublish errorとcleanup errorを両方保持するtestはhelperと同時に追加したため、失敗検出力を観測していなかった。
+
+修正: cleanup errorを捨てて元errorだけ返す変異を一時的に入れ、`publish_and_cleanup_failure_preserves_both_errors`が失敗することを確認した。実装を戻した後は`CleanupFailed`の`source`と`cleanup`を個別に検査して成功した。
+
+### 第3巡: 実装品質レビュー
+
+production timeoutはconnect 30秒、blocking read 60秒である。testでは30ミリ秒のread timeoutとchannelで制御したmidstream cancellationを使い、`Ordering::Release`で書いたflagを`Ordering::Acquire`で読む。ローカルserverのsocketは2秒で期限切れになり、全server testの固定上限も検査する。HTTP errorはtimeout、connect、status、bodyへ分類し、filesystem errorは操作名と`ErrorKind`へ正規化するため、URLと完全なローカルpathを表示しない。
+
+指摘: 旧testは、manifestと一致しない既存finalをdownload失敗後も保持する契約だった。この契約では次のtranscribeが不正finalを使い得る。
+
+修正: 旧testを削除し、不正finalを通信前に削除してdownload失敗後も残さない契約へ置き換えた。検証済みfinalを保持する経路は、manifestと一致するbytesを使う別testで確認する。
