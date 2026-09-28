@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
-use yasumaro_runtime::{ModelError, ModelId, ModelInstaller, ModelManifest, ModelSpec, ModelStore};
+use yasumaro_runtime::{
+    ModelError, ModelId, ModelInstaller, ModelManifest, ModelSpec, ModelStore, PublishCheckpoint,
+};
 
 const MODEL: ModelId = ModelId::WhisperBase;
 const FINAL_NAME: &str = "ggml-base.bin";
@@ -459,6 +461,109 @@ fn http_client_initialization_error_has_no_model_id_or_internal_message() {
     assert!(!display.contains("whisper-base"));
     assert!(!display.contains("http://"));
     assert!(!display.contains("builder"));
+}
+
+#[test]
+fn cancellation_before_publish_authorization_cleans_partial() {
+    let bytes = b"verified model";
+    let (url, server) = spawn_server(move |mut stream| {
+        let _request = read_request(&mut stream);
+        respond(&mut stream, "200 OK", bytes.len(), bytes);
+    });
+    let root = TempDir::new().expect("temporary model root");
+    let store = ModelStore::new(root.path());
+    let (checkpoint_tx, checkpoint_rx) = mpsc::channel();
+    let (resume_tx, resume_rx) = mpsc::channel();
+    let resume_rx = Arc::new(Mutex::new(resume_rx));
+    let observer_resume = Arc::clone(&resume_rx);
+    let observer = Arc::new(move |checkpoint| {
+        if checkpoint == PublishCheckpoint::BeforeAuthorization {
+            checkpoint_tx.send(()).expect("signal checkpoint");
+            observer_resume
+                .lock()
+                .expect("resume lock")
+                .recv_timeout(Duration::from_secs(2))
+                .expect("resume publication");
+        }
+    });
+    let installer = ModelInstaller::new_for_test_with_publish_observer(
+        manifest(&url, bytes, sha256(bytes)),
+        store,
+        Duration::from_secs(1),
+        Duration::from_secs(1),
+        observer,
+    )
+    .expect("construct observed installer");
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let worker_flag = Arc::clone(&cancelled);
+    let worker = thread::spawn(move || installer.install_with_cancellation(&[MODEL], &worker_flag));
+
+    checkpoint_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("reach checkpoint before authorization");
+    cancelled.store(true, Ordering::Release);
+    resume_tx.send(()).expect("resume publication");
+    let result = worker.join().expect("installer worker exits");
+    server.join().expect("server exits");
+
+    assert_eq!(result, Err(ModelError::Cancelled { id: MODEL }));
+    assert!(!root.path().join(FINAL_NAME).exists());
+    assert_no_partial(&root);
+}
+
+#[test]
+fn cancellation_after_publish_authorization_keeps_success() {
+    let bytes = b"verified model";
+    let (url, server) = spawn_server(move |mut stream| {
+        let _request = read_request(&mut stream);
+        respond(&mut stream, "200 OK", bytes.len(), bytes);
+    });
+    let root = TempDir::new().expect("temporary model root");
+    let store = ModelStore::new(root.path());
+    let model_manifest = manifest(&url, bytes, sha256(bytes));
+    let (checkpoint_tx, checkpoint_rx) = mpsc::channel();
+    let (resume_tx, resume_rx) = mpsc::channel();
+    let resume_rx = Arc::new(Mutex::new(resume_rx));
+    let observer_resume = Arc::clone(&resume_rx);
+    let observer = Arc::new(move |checkpoint| {
+        if checkpoint == PublishCheckpoint::AfterAuthorization {
+            checkpoint_tx.send(()).expect("signal checkpoint");
+            observer_resume
+                .lock()
+                .expect("resume lock")
+                .recv_timeout(Duration::from_secs(2))
+                .expect("resume publication");
+        }
+    });
+    let installer = ModelInstaller::new_for_test_with_publish_observer(
+        model_manifest.clone(),
+        store.clone(),
+        Duration::from_secs(1),
+        Duration::from_secs(1),
+        observer,
+    )
+    .expect("construct observed installer");
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let worker_flag = Arc::clone(&cancelled);
+    let worker = thread::spawn(move || installer.install_with_cancellation(&[MODEL], &worker_flag));
+
+    checkpoint_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("reach checkpoint after authorization");
+    cancelled.store(true, Ordering::Release);
+    resume_tx.send(()).expect("resume publication");
+    let result = worker.join().expect("installer worker exits");
+    server.join().expect("server exits");
+
+    result.expect("authorized publication succeeds");
+    let lease = store
+        .acquire(model_manifest.spec(MODEL).expect("model specification"))
+        .expect("published model remains verified");
+    assert_eq!(
+        std::fs::read(lease.path()).expect("read published model"),
+        bytes
+    );
+    assert_no_partial(&root);
 }
 
 #[test]

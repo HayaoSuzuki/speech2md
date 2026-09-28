@@ -10,6 +10,8 @@ mod pipeline;
 
 pub use audio::{DecodedPcm, decode_to_pcm};
 pub use error::RuntimeError;
+#[cfg(feature = "test-support")]
+pub use model::PublishCheckpoint;
 pub use model::{
     ModelError, ModelId, ModelInstaller, ModelLease, ModelManifest, ModelRootResolver, ModelSpec,
     ModelStore,

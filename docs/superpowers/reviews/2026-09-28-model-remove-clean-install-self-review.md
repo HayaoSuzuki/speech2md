@@ -373,3 +373,25 @@ current-thread runtimeはtime driverに加えてI/O driverを明示的に有効�
 指摘: 初回runtimeはtime driverだけを有効にしていたため、async reqwestがsocketを作る時点でpanicした。またheader完了とcancelが同時の場合、HTTP statusをflagより先に分類していた。
 
 修正: `enable_io()`とTokio `net` featureを追加し、send完了直後はstatus分類前に`check_cancelled`を呼ぶようにした。runtime/client構築errorは内部error、model ID、URLを持たない`HttpClientInitialization`へ正規化した。runtime全target・全featureの厳格Clippyと全testは成功した。
+
+## 公開許可境界とRust oracle
+
+### 第1巡: 要件レビュー
+
+公開処理は同じproduction関数内でBeforeAuthorization observer、最後のキャンセル確認、AfterAuthorization observer、renameの順に実行する。通常buildのobserverはno-opで、checkpoint enum、observer field、専用constructorの外部公開は`test-support` featureに限定した。許可前testはflag設定後に`Cancelled`、final不在、partial cleanupを確認し、許可後testはflag設定後も成功してmanifest検証済みfinalを取得できることを確認した。
+
+oracleはコミット済みLean fixtureを`include_str!`で読み、公開`ModelInstaller::install_with_cancellation`、`ModelStore::acquire`、`ModelStore::remove`とtest-support checkpointだけを使用する。resume、Range、validator、backup用scenarioは持たない。
+
+### 第2巡: 状態・安全性レビュー
+
+6件のproduction対応は次のように接続した。verified-publishはinstall成功、unverified-publishはhash不一致とcleanup、cancel-beforeはBeforeAuthorizationでflag設定、cancel-afterはAfterAuthorizationでflag設定、busy-removeは共有lease保持中の非待機remove、remove-successはfinalとpartialの削除である。初期artifact、cancel flag、reader lease数はfixtureの`start`から準備し、期待状態と期待結果はfixtureの`expected`と`expectedResult`だけから比較する。
+
+final存在はregular file、検証状態は`ModelStore::acquire`、partial存在はfilesystem entry、reader数は実際に取得したlease数で観測する。readerがないcaseでは観測後の冪等removeが成功するかを使ってwriter lock解放も確認する。`partialVerified`と`publishAuthorized`は完了後のproduction APIに露出しないため、公開境界testとartifact終状態を組み合わせてfalseへの遷移を検査する。model-only caseはLean生成の正常期待状態と壊れた期待状態が異なることだけを確認し、production adapterでは実行しない。
+
+### 第3巡: 実装品質レビュー
+
+各caseは独立した一時directory、local HTTP server、installer、cancel flagを持つ。accept、socket read/write、checkpoint待機、observer再開、worker結果には固定上限があり、timeoutなしのchannel受信はない。oracleが表示するのはcase名、mode、event名、結果分類、Bool/Nat状態だけで、URL、完全path、内部error文字列を含まない。schema version、mode、unknown case、field差分のunit testを追加した。
+
+指摘: 初稿の状態観測は`ModelStore::acquire(...).is_ok()`で予期しないlock/storage errorまで未検証状態へ丸め、writerを常にfalseと仮定していた。また厳格ClippyはLean schemaのBool数、複雑な環境tuple、regular-file判定、標準出力を指摘した。
+
+修正: manifest不一致と基盤errorを分離し、readerなしcaseはpublicなremoveの成否でwriter解放を観測する。環境tupleは専用structへ変更し、regular-file判定とLean schema・oracle出力だけに理由付きallowを限定した。strictは単独実行と5回連続実行ですべて6件match、reportは7件すべてmatchとなった。

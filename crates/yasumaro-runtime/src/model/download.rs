@@ -1,6 +1,8 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::Path;
+#[cfg(feature = "test-support")]
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
@@ -18,11 +20,19 @@ const LOCK_RETRY_DELAY: Duration = Duration::from_millis(25);
 const CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const BUFFER_SIZE: usize = 64 * 1_024;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PublishCheckpoint {
+    BeforeAuthorization,
+    AfterAuthorization,
+}
+
 pub struct ModelInstaller {
     manifest: ModelManifest,
     store: ModelStore,
     client: Client,
     runtime: Runtime,
+    #[cfg(feature = "test-support")]
+    publish_observer: Option<Arc<dyn Fn(PublishCheckpoint) + Send + Sync>>,
 }
 
 impl ModelInstaller {
@@ -50,6 +60,24 @@ impl ModelInstaller {
         Self::with_timeouts(manifest, store, connect_timeout, read_timeout)
     }
 
+    /// Creates a test installer that observes the two sides of publication authorization.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the async runtime or HTTP client cannot be constructed.
+    #[cfg(feature = "test-support")]
+    pub fn new_for_test_with_publish_observer(
+        manifest: ModelManifest,
+        store: ModelStore,
+        connect_timeout: Duration,
+        read_timeout: Duration,
+        observer: Arc<dyn Fn(PublishCheckpoint) + Send + Sync>,
+    ) -> Result<Self, ModelError> {
+        let mut installer = Self::with_timeouts(manifest, store, connect_timeout, read_timeout)?;
+        installer.publish_observer = Some(observer);
+        Ok(installer)
+    }
+
     fn with_timeouts(
         manifest: ModelManifest,
         store: ModelStore,
@@ -72,6 +100,8 @@ impl ModelInstaller {
             store,
             client,
             runtime,
+            #[cfg(feature = "test-support")]
+            publish_observer: None,
         })
     }
 
@@ -131,7 +161,14 @@ impl ModelInstaller {
             Err(ModelError::Cancelled { id: spec.id })
         } else {
             self.download_and_verify(spec, &paths.partial_path, cancelled)
-                .and_then(|()| publish_verified(&paths.partial_path, &paths.final_path))
+                .and_then(|()| {
+                    self.publish_authorized(
+                        spec.id,
+                        &paths.partial_path,
+                        &paths.final_path,
+                        cancelled,
+                    )
+                })
         };
         if let Err(source) = result {
             return Err(failure_after_cleanup(spec.id, &paths.partial_path, source));
@@ -196,6 +233,28 @@ impl ModelInstaller {
             path,
             cancelled,
         ))
+    }
+
+    fn publish_authorized(
+        &self,
+        id: ModelId,
+        partial_path: &Path,
+        final_path: &Path,
+        cancelled: &AtomicBool,
+    ) -> Result<(), ModelError> {
+        self.observe_publish_checkpoint(PublishCheckpoint::BeforeAuthorization);
+        check_cancelled(id, cancelled)?;
+        self.observe_publish_checkpoint(PublishCheckpoint::AfterAuthorization);
+        publish_verified(partial_path, final_path)
+    }
+
+    fn observe_publish_checkpoint(&self, checkpoint: PublishCheckpoint) {
+        #[cfg(feature = "test-support")]
+        if let Some(observer) = &self.publish_observer {
+            observer(checkpoint);
+        }
+        #[cfg(not(feature = "test-support"))]
+        let _ = checkpoint;
     }
 }
 

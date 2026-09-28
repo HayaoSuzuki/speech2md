@@ -3,6 +3,8 @@ mod manifest;
 mod store;
 
 pub use download::ModelInstaller;
+#[cfg(feature = "test-support")]
+pub use download::PublishCheckpoint;
 pub use manifest::{ModelId, ModelManifest, ModelSpec};
 pub use store::{ModelLease, ModelRootResolver, ModelStore};
 
