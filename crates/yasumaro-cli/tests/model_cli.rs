@@ -1,8 +1,22 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
+use url::Url;
+use yasumaro_runtime::{ModelId, ModelSpec, ModelStore};
 
 fn yasumaro() -> Command {
     Command::new(env!("CARGO_BIN_EXE_yasumaro"))
+}
+
+fn model_spec(id: ModelId, file_name: &str, bytes: &[u8], sha256: &str) -> ModelSpec {
+    ModelSpec {
+        id,
+        engine_version: "test".into(),
+        url: Url::parse("https://example.invalid/model").expect("fixture URL"),
+        size: u64::try_from(bytes.len()).expect("fixture length fits u64"),
+        sha256: sha256.into(),
+        license: "CC0-1.0".into(),
+        file_name: file_name.into(),
+    }
 }
 
 #[test]
@@ -41,6 +55,11 @@ fn selected_model_install_reports_failure_without_partial_files() {
 #[test]
 fn model_help_lists_every_installable_choice() {
     yasumaro()
+        .args(["model", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("remove"));
+    yasumaro()
         .args(["model", "install", "--help"])
         .assert()
         .success()
@@ -51,4 +70,135 @@ fn model_help_lists_every_installable_choice() {
         .stdout(predicate::str::contains("whisper-large-v3-turbo"))
         .stdout(predicate::str::contains("speaker-segmentation"))
         .stdout(predicate::str::contains("speaker-embedding"));
+}
+
+#[test]
+fn remove_requires_at_least_one_model() {
+    yasumaro()
+        .args(["model", "remove"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("required"));
+}
+
+#[test]
+fn remove_deletes_final_and_partial_files() {
+    let root = tempfile::tempdir().expect("temporary model root");
+    let final_path = root.path().join("ggml-base.bin");
+    let partial_path = root.path().join("ggml-base.bin.part");
+    std::fs::write(&final_path, b"final").expect("write final model");
+    std::fs::write(&partial_path, b"partial").expect("write partial model");
+
+    yasumaro()
+        .args(["model", "remove", "whisper-base"])
+        .env("YASUMARO_MODEL_DIR", root.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Removed 1 model(s)."));
+
+    assert!(!final_path.exists());
+    assert!(!partial_path.exists());
+}
+
+#[test]
+fn remove_deduplicates_models() {
+    let root = tempfile::tempdir().expect("temporary model root");
+    std::fs::write(root.path().join("ggml-base.bin"), b"base").expect("write base model");
+    std::fs::write(root.path().join("ggml-small.bin"), b"small").expect("write small model");
+
+    yasumaro()
+        .args([
+            "model",
+            "remove",
+            "whisper-small",
+            "whisper-base",
+            "whisper-small",
+        ])
+        .env("YASUMARO_MODEL_DIR", root.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Removed 2 model(s)."));
+}
+
+#[test]
+fn remove_stops_after_first_failure_without_rollback() {
+    let root = tempfile::tempdir().expect("temporary model root");
+    let base = root.path().join("ggml-base.bin");
+    let small = root.path().join("ggml-small.bin");
+    let medium = root.path().join("ggml-medium.bin");
+    std::fs::write(&base, b"base").expect("write base model");
+    std::fs::write(&small, b"small").expect("write small model");
+    std::fs::write(&medium, b"medium").expect("write medium model");
+    let store = ModelStore::new(root.path());
+    let small_spec = model_spec(
+        ModelId::WhisperSmall,
+        "ggml-small.bin",
+        b"small",
+        "81db8ebbbbc69c6c6ad4a6aa92b76e0c08af547da236b9e2c9dbe1d8285a8130",
+    );
+    let _lease = store.acquire(&small_spec).expect("lease middle model");
+
+    yasumaro()
+        .args([
+            "model",
+            "remove",
+            "whisper-medium",
+            "whisper-small",
+            "whisper-base",
+        ])
+        .env("YASUMARO_MODEL_DIR", root.path())
+        .assert()
+        .code(4)
+        .stdout(predicate::str::is_empty());
+
+    assert!(!base.exists(), "successful prefix is not rolled back");
+    assert!(small.exists(), "busy model is unchanged");
+    assert!(
+        medium.exists(),
+        "models after the failure are not processed"
+    );
+}
+
+#[test]
+fn model_in_use_reports_retry_help() {
+    let root = tempfile::tempdir().expect("temporary model root");
+    std::fs::write(root.path().join("ggml-base.bin"), b"base").expect("write base model");
+    let store = ModelStore::new(root.path());
+    let base_spec = model_spec(
+        ModelId::WhisperBase,
+        "ggml-base.bin",
+        b"base",
+        "cae662172fd450bb0cd710a769079c05bfc5d8e35efa6576edc7d0377afdd4a2",
+    );
+    let _lease = store.acquire(&base_spec).expect("lease base model");
+
+    yasumaro()
+        .args(["model", "remove", "whisper-base"])
+        .env("YASUMARO_MODEL_DIR", root.path())
+        .assert()
+        .code(4)
+        .stderr(predicate::str::contains(
+            "retry `yasumaro model remove whisper-base` after transcription or installation completes",
+        ));
+}
+
+#[test]
+fn readme_explains_model_removal_and_cleanup() {
+    let readme = include_str!("../../../README.md");
+
+    for required in [
+        "yasumaro model remove whisper-small",
+        "一つ以上",
+        "`.part`",
+        "通常の失敗",
+        "強制終了",
+        "次回の`model install`または`model remove`",
+        "model whisper-small is in use",
+        "途中から再開せず",
+    ] {
+        assert!(
+            readme.contains(required),
+            "README is missing the model lifecycle contract: {required}"
+        );
+    }
 }

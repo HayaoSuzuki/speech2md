@@ -98,6 +98,7 @@ fn existing_output_fails_before_models_or_inference_and_preserves_bytes() {
 fn readme_command_examples_are_accepted_by_the_argument_parser() {
     let examples = [
         ["model", "install"].as_slice(),
+        ["model", "remove", "whisper-small"].as_slice(),
         ["engine", "install"].as_slice(),
         ["transcribe", "meeting.m4a"].as_slice(),
         [

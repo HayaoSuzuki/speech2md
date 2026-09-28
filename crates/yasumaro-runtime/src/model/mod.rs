@@ -3,8 +3,10 @@ mod manifest;
 mod store;
 
 pub use download::ModelInstaller;
+#[cfg(feature = "test-support")]
+pub use download::PublishCheckpoint;
 pub use manifest::{ModelId, ModelManifest, ModelSpec};
-pub use store::{ModelRootResolver, ModelStore};
+pub use store::{ModelLease, ModelRootResolver, ModelStore};
 
 use thiserror::Error;
 
@@ -21,6 +23,8 @@ pub enum ModelError {
     InvalidModelRoot(String),
     #[error("model {id} download failed: {message}")]
     Download { id: ModelId, message: String },
+    #[error("HTTP client initialization failed")]
+    HttpClientInitialization,
     #[error("model {id} has size {actual}, expected {expected}")]
     SizeMismatch {
         id: ModelId,
@@ -32,6 +36,18 @@ pub enum ModelError {
         id: ModelId,
         expected: String,
         actual: String,
+    },
+    #[error("model {id} lock operation failed: {message}")]
+    Lock { id: ModelId, message: String },
+    #[error("model {id} is in use")]
+    ModelInUse { id: ModelId },
+    #[error("model {id} installation was cancelled")]
+    Cancelled { id: ModelId },
+    #[error("model {id} installation failed: {source}; partial cleanup failed: {cleanup}")]
+    CleanupFailed {
+        id: ModelId,
+        source: Box<Self>,
+        cleanup: String,
     },
     #[error("model storage operation failed: {0}")]
     Storage(String),

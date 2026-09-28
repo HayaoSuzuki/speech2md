@@ -13,7 +13,8 @@ use yasumaro_core::{SpeakerId, SpeakerTurn, TimeSpan, Timestamp};
 use yasumaro_runtime::engine::{DiarizationRequest, Diarizer, EngineError};
 use yasumaro_runtime::engine_artifact::{EngineSpec, EngineStore, Platform};
 use yasumaro_runtime::{
-    ModelId, ModelStore, RuntimeError, RuntimeServices, TranscribeOptions, run_transcription,
+    ModelId, ModelManifest, ModelSpec, ModelStore, RuntimeError, RuntimeServices,
+    TranscribeOptions, run_transcription,
 };
 
 const OWNER_MARKER: &str = ".yasumaro-owner";
@@ -60,6 +61,7 @@ struct Fixture {
     capture: PathBuf,
     engine_spec: EngineSpec,
     engine_store: EngineStore,
+    model_manifest: ModelManifest,
     model_store: ModelStore,
 }
 
@@ -113,15 +115,12 @@ impl Fixture {
         .expect("engine receipt");
 
         let capture = root.path().join("capture.json");
-        fs::write(
-            model_root.join("ggml-base.bin"),
-            serde_json::to_vec(&Control {
-                mode,
-                capture: &capture,
-            })
-            .expect("control JSON"),
-        )
-        .expect("fake whisper model");
+        let model_bytes = serde_json::to_vec(&Control {
+            mode,
+            capture: &capture,
+        })
+        .expect("control JSON");
+        fs::write(model_root.join("ggml-base.bin"), &model_bytes).expect("fake whisper model");
         fs::write(model_root.join("segmentation-3-0.onnx"), b"fixture")
             .expect("segmentation model");
         fs::write(
@@ -130,6 +129,16 @@ impl Fixture {
         )
         .expect("embedding model");
 
+        let model_manifest = ModelManifest::new(vec![ModelSpec {
+            id: ModelId::WhisperBase,
+            engine_version: "test".into(),
+            url: Url::parse("https://example.invalid/model").expect("model URL"),
+            size: u64::try_from(model_bytes.len()).expect("model length fits u64"),
+            sha256: format!("{:x}", Sha256::digest(&model_bytes)),
+            license: "CC0-1.0".into(),
+            file_name: "ggml-base.bin".into(),
+        }])
+        .expect("model manifest");
         Self {
             _root: root,
             input,
@@ -138,6 +147,7 @@ impl Fixture {
             capture,
             engine_spec,
             engine_store: EngineStore::new(engine_root),
+            model_manifest,
             model_store: ModelStore::new(model_root),
         }
     }
@@ -146,6 +156,7 @@ impl Fixture {
         RuntimeServices::new(
             &self.engine_store,
             &self.engine_spec,
+            &self.model_manifest,
             &self.model_store,
             diarizer,
             &self.temp_root,

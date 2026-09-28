@@ -132,8 +132,23 @@ fn execute_model(command: &ModelCommand) -> Result<String, AppError> {
             } else {
                 models.iter().copied().map(ModelId::from).collect()
             };
-            ModelInstaller::new(manifest, store)?.install(&ids)?;
+            let cancelled = cancellation_flag()?;
+            ModelInstaller::new(manifest, store)?
+                .install_with_cancellation(&ids, cancelled.as_ref())?;
             Ok(format!("Installed {} model(s).", ids.len()))
+        }
+        ModelCommand::Remove { models } => {
+            let mut ids = models
+                .iter()
+                .copied()
+                .map(ModelId::from)
+                .collect::<Vec<_>>();
+            ids.sort_unstable();
+            ids.dedup();
+            for &id in &ids {
+                store.remove(id)?;
+            }
+            Ok(format!("Removed {} model(s).", ids.len()))
         }
     }
 }
@@ -150,16 +165,24 @@ fn execute_transcribe(arguments: &TranscribeArgs) -> Result<String, AppError> {
     let platform = Platform::current()?;
     let engine_spec = engine_manifest.select(platform)?;
     let engine_store = EngineStore::new(EngineRootResolver::resolve()?);
+    let model_manifest = ModelManifest::embedded()?;
     let model_store = ModelStore::new(ModelRootResolver::resolve()?);
     let threads = std::thread::available_parallelism().map_or(1, usize::from);
-    let segmentation = model_store.require(ModelId::SpeakerSegmentation)?;
-    let embedding = model_store.require(ModelId::SpeakerEmbedding)?;
-    let diarizer = SherpaDiarizer::new(&segmentation, &embedding, threads)
+    let cancelled = cancellation_flag()?;
+    let segmentation = model_store
+        .acquire_with_cancellation(
+            model_manifest.spec(ModelId::SpeakerSegmentation)?,
+            cancelled.as_ref(),
+        )
+        .map_err(map_transcribe_model_acquire)?;
+    let embedding = model_store
+        .acquire_with_cancellation(
+            model_manifest.spec(ModelId::SpeakerEmbedding)?,
+            cancelled.as_ref(),
+        )
+        .map_err(map_transcribe_model_acquire)?;
+    let diarizer = SherpaDiarizer::new(segmentation, embedding, threads)
         .map_err(|error| RuntimeError::Diarization(error.to_string()))?;
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let trigger = Arc::clone(&cancelled);
-    ctrlc::set_handler(move || trigger.store(true, Ordering::Release))
-        .map_err(|error| AppError::Configuration(error.to_string()))?;
     let title = arguments
         .input
         .file_stem()
@@ -179,6 +202,7 @@ fn execute_transcribe(arguments: &TranscribeArgs) -> Result<String, AppError> {
     let services = RuntimeServices::new(
         &engine_store,
         engine_spec,
+        &model_manifest,
         &model_store,
         &diarizer,
         &temp_root,
@@ -203,6 +227,21 @@ fn execute_transcribe(arguments: &TranscribeArgs) -> Result<String, AppError> {
         report.segment_count,
         display_name(&output)
     ))
+}
+
+fn cancellation_flag() -> Result<Arc<AtomicBool>, AppError> {
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let trigger = Arc::clone(&cancelled);
+    ctrlc::set_handler(move || trigger.store(true, Ordering::Release))
+        .map_err(|error| AppError::Configuration(error.to_string()))?;
+    Ok(cancelled)
+}
+
+fn map_transcribe_model_acquire(error: ModelError) -> AppError {
+    match error {
+        ModelError::Cancelled { .. } => RuntimeError::Cancelled.into(),
+        other => other.into(),
+    }
 }
 
 fn doctor() -> Result<String, AppError> {
@@ -259,9 +298,10 @@ impl From<WhisperChoice> for ModelId {
 
 const fn classify(error: &AppError) -> u8 {
     match error {
+        AppError::Model(ModelError::Cancelled { .. })
+        | AppError::Runtime(RuntimeError::Cancelled) => 130,
         AppError::Engine(_) | AppError::Model(_) => 4,
         AppError::Runtime(RuntimeError::OutputExists | RuntimeError::Output(_)) => 6,
-        AppError::Runtime(RuntimeError::Cancelled) => 130,
         AppError::Runtime(
             RuntimeError::Transcription(_)
             | RuntimeError::Diarization(_)
@@ -270,19 +310,28 @@ const fn classify(error: &AppError) -> u8 {
         AppError::Configuration(_) | AppError::Runtime(_) => 3,
     }
 }
-const fn help(error: &AppError) -> Option<&'static str> {
+fn help(error: &AppError) -> Option<String> {
     match error {
         AppError::Engine(
             EngineArtifactError::MissingEngine { .. } | EngineArtifactError::CorruptEngine { .. },
-        ) => Some("run `yasumaro engine install`"),
+        ) => Some("run `yasumaro engine install`".into()),
         AppError::Engine(EngineArtifactError::Download(_)) => {
-            Some("check the network connection and retry `yasumaro engine install`")
+            Some("check the network connection and retry `yasumaro engine install`".into())
         }
         AppError::Model(ModelError::MissingModel { .. }) => {
-            Some("run the model install command shown above")
+            Some("run the model install command shown above".into())
+        }
+        AppError::Model(ModelError::ModelInUse { id }) => Some(format!(
+            "retry `yasumaro model remove {id}` after transcription or installation completes"
+        )),
+        AppError::Model(ModelError::CleanupFailed { id, .. }) => Some(format!(
+            "run `yasumaro model remove {id}` to clean the incomplete model"
+        )),
+        AppError::Model(ModelError::Cancelled { id }) => {
+            Some(format!("retry `yasumaro model install {id}`"))
         }
         AppError::Runtime(RuntimeError::OutputExists) => {
-            Some("pass --force only when replacement is intended")
+            Some("pass --force only when replacement is intended".into())
         }
         _ => None,
     }
@@ -298,7 +347,10 @@ fn display_name(path: &Path) -> String {
 mod tests {
     use clap::Parser;
 
-    use super::{Cli, Command, ModelId};
+    use super::{
+        AppError, Cli, Command, ModelError, ModelId, RuntimeError, classify, help,
+        map_transcribe_model_acquire,
+    };
 
     #[test]
     fn transcription_choices_resolve_to_the_selected_model() {
@@ -327,5 +379,46 @@ mod tests {
             panic!("expected transcription command");
         };
         assert_eq!(ModelId::from(arguments.whisper), ModelId::WhisperBase);
+    }
+
+    #[test]
+    fn model_cancellation_uses_exit_code_130() {
+        let error = AppError::Model(ModelError::Cancelled {
+            id: ModelId::WhisperSmall,
+        });
+
+        assert_eq!(classify(&error), 130);
+        assert!(
+            help(&error)
+                .is_some_and(|text| { text.contains("yasumaro model install whisper-small") })
+        );
+    }
+
+    #[test]
+    fn transcription_model_acquire_cancellation_has_no_install_help() {
+        let error = map_transcribe_model_acquire(ModelError::Cancelled {
+            id: ModelId::SpeakerSegmentation,
+        });
+
+        assert!(matches!(error, AppError::Runtime(RuntimeError::Cancelled)));
+        assert_eq!(classify(&error), 130);
+        assert_eq!(help(&error), None);
+    }
+
+    #[test]
+    fn cleanup_failure_reports_model_remove_help() {
+        let error = AppError::Model(ModelError::CleanupFailed {
+            id: ModelId::WhisperMedium,
+            source: Box::new(ModelError::Cancelled {
+                id: ModelId::WhisperMedium,
+            }),
+            cleanup: "remove partial model: permission denied".into(),
+        });
+
+        assert_eq!(classify(&error), 4);
+        assert!(
+            help(&error)
+                .is_some_and(|text| { text.contains("yasumaro model remove whisper-medium") })
+        );
     }
 }

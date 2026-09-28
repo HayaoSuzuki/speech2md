@@ -23,7 +23,7 @@ pub enum Command {
         #[command(subcommand)]
         command: EngineCommand,
     },
-    /// Install or inspect local inference models.
+    /// Install, remove, or inspect local inference models.
     Model {
         #[command(subcommand)]
         command: ModelCommand,
@@ -75,6 +75,11 @@ pub enum ModelCommand {
     /// Download and verify the default model set, or selected models.
     Install {
         #[arg(value_enum)]
+        models: Vec<ModelChoice>,
+    },
+    /// Remove one or more local models without waiting for active users.
+    Remove {
+        #[arg(value_enum, num_args = 1.., required = true)]
         models: Vec<ModelChoice>,
     },
     /// List every known model and its local installation state.

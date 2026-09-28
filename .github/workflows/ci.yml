@@ -37,4 +37,6 @@ jobs:
         with:
           toolchain: 1.98.1
           components: clippy
+      - name: Check default-feature targets
+        run: cargo check --workspace --all-targets --locked
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings

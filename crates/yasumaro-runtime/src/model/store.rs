@@ -1,15 +1,49 @@
 use std::env;
+use std::ffi::OsString;
+use std::fs::{self, File, OpenOptions};
+use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
 
 use directories::ProjectDirs;
+use fs4::fs_std::FileExt as _;
+use sha2::{Digest, Sha256};
 
-use super::{ModelError, ModelId};
+use super::{ModelError, ModelId, ModelSpec};
 
 const MODEL_DIRECTORY_ENV: &str = "YASUMARO_MODEL_DIR";
+const VERIFY_BUFFER_SIZE: usize = 64 * 1024;
+const LOCK_RETRY_DELAY: Duration = Duration::from_millis(25);
 
 #[derive(Clone, Debug)]
 pub struct ModelStore {
     root: PathBuf,
+}
+
+#[derive(Debug)]
+pub struct ModelLease {
+    path: PathBuf,
+    _lock: File,
+}
+
+impl ModelLease {
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+pub(super) struct ModelPaths {
+    pub final_path: PathBuf,
+    pub partial_path: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RemovalKind {
+    Directory,
+    FileLike,
 }
 
 impl ModelStore {
@@ -30,17 +64,239 @@ impl ModelStore {
     /// Returns [`ModelError::MissingModel`] when the expected local file does not exist.
     pub fn require(&self, id: ModelId) -> Result<PathBuf, ModelError> {
         let path = self.path(id);
-        path.is_file()
+        is_regular_file(&path)
             .then_some(path)
-            .ok_or_else(|| ModelError::MissingModel {
-                id,
-                install_command: format!("yasumaro model install {id}"),
-            })
+            .ok_or_else(|| missing_model(id))
+    }
+
+    /// Acquires a shared lease after verifying the installed model against its manifest entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when locking fails, the model is not a regular file, or its complete size
+    /// and SHA-256 do not match `spec` after the lock is acquired.
+    pub fn acquire(&self, spec: &ModelSpec) -> Result<ModelLease, ModelError> {
+        let id = spec.id;
+        let lock = self.open_lock(id)?;
+        fs4::fs_std::FileExt::lock_shared(&lock)
+            .map_err(|error| lock_error(id, "acquire shared lock", &error))?;
+        self.finish_acquire(spec, lock, None)
+    }
+
+    /// Acquires and verifies a shared model lease while observing a cancellation flag.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ModelError::Cancelled`] while waiting for the lock or hashing the model. Other
+    /// errors are the same as [`Self::acquire`].
+    pub fn acquire_with_cancellation(
+        &self,
+        spec: &ModelSpec,
+        cancelled: &AtomicBool,
+    ) -> Result<ModelLease, ModelError> {
+        let id = spec.id;
+        let lock = self.open_lock(id)?;
+        loop {
+            check_cancelled(id, Some(cancelled))?;
+            let acquired = fs4::fs_std::FileExt::try_lock_shared(&lock)
+                .map_err(|error| lock_error(id, "try shared lock", &error))?;
+            if acquired {
+                break;
+            }
+            thread::sleep(LOCK_RETRY_DELAY);
+        }
+        self.finish_acquire(spec, lock, Some(cancelled))
+    }
+
+    fn finish_acquire(
+        &self,
+        spec: &ModelSpec,
+        lock: File,
+        cancelled: Option<&AtomicBool>,
+    ) -> Result<ModelLease, ModelError> {
+        let id = spec.id;
+        check_cancelled(id, cancelled)?;
+        let path = self.path(id);
+        if !is_regular_file(&path) {
+            return Err(missing_model(id));
+        }
+        verify_file(spec, &path, cancelled)?;
+        check_cancelled(id, cancelled)?;
+        Ok(ModelLease { path, _lock: lock })
+    }
+
+    /// Removes a model and any stale partial file without waiting for active users.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ModelError::ModelInUse`] when the model lock is busy. Lock setup and filesystem
+    /// failures retain their distinct error classifications.
+    pub fn remove(&self, id: ModelId) -> Result<(), ModelError> {
+        if let Some(_lock) = self.try_lock_exclusive(id)? {
+            let paths = self.paths(id);
+            remove_entry(&paths.partial_path)?;
+            remove_entry(&paths.final_path)
+        } else {
+            Err(ModelError::ModelInUse { id })
+        }
+    }
+
+    pub(super) fn try_lock_exclusive(&self, id: ModelId) -> Result<Option<File>, ModelError> {
+        let lock = self.open_lock(id)?;
+        lock.try_lock_exclusive()
+            .map(|acquired| acquired.then_some(lock))
+            .map_err(|error| lock_error(id, "try exclusive lock", &error))
+    }
+
+    pub(super) fn paths(&self, id: ModelId) -> ModelPaths {
+        let final_path = self.path(id);
+        let mut partial_name = OsString::from(final_path.as_os_str());
+        partial_name.push(".part");
+        ModelPaths {
+            final_path,
+            partial_path: PathBuf::from(partial_name),
+        }
     }
 
     pub(super) fn path(&self, id: ModelId) -> PathBuf {
         self.root.join(id.file_name())
     }
+
+    fn open_lock(&self, id: ModelId) -> Result<File, ModelError> {
+        let lock_directory = self.root.join(".locks");
+        fs::create_dir_all(&lock_directory)
+            .map_err(|error| lock_error(id, "create lock directory", &error))?;
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lock_directory.join(format!("{id}.lock")))
+            .map_err(|error| lock_error(id, "open lock file", &error))
+    }
+}
+
+fn verify_file(
+    spec: &ModelSpec,
+    path: &Path,
+    cancelled: Option<&AtomicBool>,
+) -> Result<(), ModelError> {
+    let mut file = File::open(path).map_err(|error| storage_error("open final model", &error))?;
+    verify_reader(spec, &mut file, cancelled)
+}
+
+fn verify_reader(
+    spec: &ModelSpec,
+    reader: &mut impl io::Read,
+    cancelled: Option<&AtomicBool>,
+) -> Result<(), ModelError> {
+    let mut size = 0_u64;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; VERIFY_BUFFER_SIZE].into_boxed_slice();
+    loop {
+        check_cancelled(spec.id, cancelled)?;
+        let count = reader
+            .read(&mut buffer)
+            .map_err(|error| storage_error("read final model", &error))?;
+        check_cancelled(spec.id, cancelled)?;
+        if count == 0 {
+            break;
+        }
+        size = size
+            .checked_add(
+                u64::try_from(count)
+                    .map_err(|_| ModelError::Storage("count final bytes: overflow".into()))?,
+            )
+            .ok_or_else(|| ModelError::Storage("count final bytes: overflow".into()))?;
+        hasher.update(&buffer[..count]);
+    }
+    check_cancelled(spec.id, cancelled)?;
+    if size != spec.size {
+        return Err(ModelError::SizeMismatch {
+            id: spec.id,
+            expected: spec.size,
+            actual: size,
+        });
+    }
+    let actual = format!("{:x}", hasher.finalize());
+    if actual != spec.sha256 {
+        return Err(ModelError::HashMismatch {
+            id: spec.id,
+            expected: spec.sha256.clone(),
+            actual,
+        });
+    }
+    Ok(())
+}
+
+fn check_cancelled(id: ModelId, cancelled: Option<&AtomicBool>) -> Result<(), ModelError> {
+    if cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        Err(ModelError::Cancelled { id })
+    } else {
+        Ok(())
+    }
+}
+
+pub(super) fn remove_entry(path: &Path) -> Result<(), ModelError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(storage_error("inspect model entry", &error)),
+    };
+    let file_type = metadata.file_type();
+    let result = match removal_kind(file_type.is_dir(), is_directory_symlink(file_type)) {
+        RemovalKind::Directory => fs::remove_dir(path),
+        RemovalKind::FileLike => fs::remove_file(path),
+    };
+    result.map_err(|error| storage_error("remove model entry", &error))
+}
+
+const fn removal_kind(is_directory: bool, is_directory_symlink: bool) -> RemovalKind {
+    if is_directory || is_directory_symlink {
+        RemovalKind::Directory
+    } else {
+        RemovalKind::FileLike
+    }
+}
+
+#[cfg(windows)]
+fn is_directory_symlink(file_type: fs::FileType) -> bool {
+    use std::os::windows::fs::FileTypeExt as _;
+
+    file_type.is_symlink_dir()
+}
+
+#[cfg(not(windows))]
+const fn is_directory_symlink(_file_type: fs::FileType) -> bool {
+    false
+}
+
+fn is_regular_file(path: &Path) -> bool {
+    // This store deliberately rejects symlinks and special files, so regular-file semantics are
+    // narrower than Clippy's suggested "not a directory" check.
+    #[allow(
+        clippy::filetype_is_file,
+        reason = "model paths must reject symlinks and special files"
+    )]
+    fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_file())
+}
+
+fn missing_model(id: ModelId) -> ModelError {
+    ModelError::MissingModel {
+        id,
+        install_command: format!("yasumaro model install {id}"),
+    }
+}
+
+fn lock_error(id: ModelId, operation: &str, error: &io::Error) -> ModelError {
+    ModelError::Lock {
+        id,
+        message: format!("{operation}: {}", error.kind()),
+    }
+}
+
+fn storage_error(operation: &str, error: &io::Error) -> ModelError {
+    ModelError::Storage(format!("{operation}: {}", error.kind()))
 }
 
 pub struct ModelRootResolver;
@@ -79,11 +335,69 @@ fn resolve_paths(
 
 #[cfg(test)]
 mod tests {
+    use std::io::{self, Read};
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use directories::ProjectDirs;
+    use sha2::{Digest, Sha256};
+    use url::Url;
 
-    use super::{ModelError, ModelRootResolver, default_model_root, resolve_paths};
+    use super::{
+        ModelError, ModelId, ModelRootResolver, ModelSpec, RemovalKind, default_model_root,
+        removal_kind, resolve_paths, verify_reader,
+    };
+
+    struct CancelAfterFirstRead<'a> {
+        bytes: &'a [u8],
+        cancelled: &'a AtomicBool,
+        finished: bool,
+    }
+
+    impl Read for CancelAfterFirstRead<'_> {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if self.finished {
+                return Ok(0);
+            }
+            let count = self.bytes.len().min(buffer.len());
+            buffer[..count].copy_from_slice(&self.bytes[..count]);
+            self.finished = true;
+            self.cancelled.store(true, Ordering::Release);
+            Ok(count)
+        }
+    }
+
+    #[test]
+    fn verification_observes_cancellation_between_hash_chunks() {
+        let bytes = b"first verification chunk";
+        let cancelled = AtomicBool::new(false);
+        let spec = ModelSpec {
+            id: ModelId::WhisperBase,
+            engine_version: "test".into(),
+            url: Url::parse("https://example.invalid/model").expect("fixture URL"),
+            size: u64::try_from(bytes.len()).expect("fixture size"),
+            sha256: format!("{:x}", Sha256::digest(bytes)),
+            license: "CC0-1.0".into(),
+            file_name: "ggml-base.bin".into(),
+        };
+        let mut reader = CancelAfterFirstRead {
+            bytes,
+            cancelled: &cancelled,
+            finished: false,
+        };
+
+        assert!(matches!(
+            verify_reader(&spec, &mut reader, Some(&cancelled)),
+            Err(ModelError::Cancelled {
+                id: ModelId::WhisperBase
+            })
+        ));
+    }
+
+    #[test]
+    fn windows_directory_symlink_uses_directory_removal() {
+        assert_eq!(removal_kind(false, true), RemovalKind::Directory);
+    }
 
     #[test]
     fn absolute_override_has_priority() {

@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use serde::Serialize;
 use yasumaro_runtime::engine::{DiarizationRequest, Diarizer, SherpaDiarizer};
-use yasumaro_runtime::{ModelId, ModelRootResolver, ModelStore, decode_to_pcm};
+use yasumaro_runtime::{ModelId, ModelManifest, ModelRootResolver, ModelStore, decode_to_pcm};
 
 const CASES: [(&str, u32); 10] = [
     ("single-female1.wav", 1),
@@ -57,15 +57,24 @@ fn evaluates_voicepeak_diarization_without_transcription() {
         .canonicalize()
         .expect("canonicalize VOICEPEAK directory");
     let model_store = ModelStore::new(ModelRootResolver::resolve().expect("resolve model root"));
+    let manifest = ModelManifest::embedded().expect("embedded model manifest");
     let segmentation = model_store
-        .require(ModelId::SpeakerSegmentation)
+        .acquire(
+            manifest
+                .spec(ModelId::SpeakerSegmentation)
+                .expect("segmentation specification"),
+        )
         .expect("installed speaker segmentation model");
     let embedding = model_store
-        .require(ModelId::SpeakerEmbedding)
+        .acquire(
+            manifest
+                .spec(ModelId::SpeakerEmbedding)
+                .expect("embedding specification"),
+        )
         .expect("installed speaker embedding model");
     let threads = std::thread::available_parallelism().map_or(1, usize::from);
-    let diarizer = SherpaDiarizer::new(&segmentation, &embedding, threads)
-        .expect("initialize speaker diarizer");
+    let diarizer =
+        SherpaDiarizer::new(segmentation, embedding, threads).expect("initialize speaker diarizer");
     let temporary = tempfile::tempdir().expect("evaluation temporary directory");
 
     let cases = CASES

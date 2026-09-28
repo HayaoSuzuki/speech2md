@@ -1,0 +1,43 @@
+name: Formal verification
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  formal:
+    name: Lean proofs
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: formal
+          auto-config: false
+          build: true
+          test: false
+          lint: false
+      - name: Run Lean executable tests
+        working-directory: formal
+        run: lake exe YasumaroTests
+      - name: Check generated model lifecycle fixture
+        working-directory: formal
+        run: lake exe model-lifecycle-testgen -- --check ../crates/yasumaro-runtime/tests/fixtures/lean-model-lifecycle.json
+      - name: Test model lifecycle oracle
+        run: cargo test -p yasumaro-runtime --example model_lifecycle_oracle --features test-support --locked
+      - name: Compare Rust model lifecycle with Lean
+        run: cargo run -p yasumaro-runtime --example model_lifecycle_oracle --features test-support --locked -- --strict
