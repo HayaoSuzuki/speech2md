@@ -527,7 +527,7 @@ macOSのx86_64とarm64で、`progressing_response_is_not_limited_by_the_read_tim
 
 最初の修正: 該当testのserver socketだけに`set_nodelay(true)`を設定した。しかしremoteのmacOS x86_64とarm64は同じtimeoutで再び失敗したため、Nagle bufferingだけが原因という仮説は棄却した。
 
-最終修正: TCP_NODELAYに加え、test用read timeoutを500ミリ秒、chunk間隔を100ミリ秒、chunk数を7、各chunkを8KiBとした。header待ちとchunk間の無進捗には5倍の余裕があり、最後のchunkは開始から約600ミリ秒後なので総時間制限へ変異すれば500ミリ秒で失敗する。production timeout値とdownload処理は変更していない。
+最終修正: TCP_NODELAYに加え、test用read timeoutを500ミリ秒、chunk間隔を100ミリ秒、chunk数を7、各chunkを8KiBとした。header待ちの上限を80ミリ秒から500ミリ秒へ広げ、read timeoutをchunk間隔の5倍にした。最後のchunkは開始から約600ミリ秒後なので、総時間制限へ変異すれば500ミリ秒で失敗する。production timeout値とdownload処理は変更していない。
 
 ### 第2巡: 状態・安全性レビュー
 
