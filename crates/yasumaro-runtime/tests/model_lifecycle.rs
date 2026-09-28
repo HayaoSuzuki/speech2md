@@ -76,6 +76,29 @@ fn acquire_holds_a_shared_lease_for_a_regular_model() {
 }
 
 #[test]
+fn dropping_one_shared_lease_keeps_other_readers_locked() {
+    let (root, store) = store();
+    let final_path = root.path().join(FINAL_NAME);
+    let bytes = b"verified model";
+    fs::write(&final_path, bytes).expect("write model");
+    let model = spec(MODEL, FINAL_NAME, bytes);
+    let first = store.acquire(&model).expect("acquire first model lease");
+    let second = store.acquire(&model).expect("acquire second model lease");
+
+    drop(first);
+    assert_eq!(
+        store.remove(MODEL),
+        Err(ModelError::ModelInUse { id: MODEL })
+    );
+    drop(second);
+
+    store
+        .remove(MODEL)
+        .expect("remove after both leases release");
+    assert!(!final_path.exists());
+}
+
+#[test]
 fn cancellable_acquire_stops_waiting_for_a_writer() {
     let (root, store) = store();
     let bytes = b"verified model";

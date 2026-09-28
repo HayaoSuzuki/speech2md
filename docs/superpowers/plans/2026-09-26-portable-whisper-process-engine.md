@@ -17,7 +17,7 @@
 ## Global Constraints
 
 - 公式成果物は `windows-x86_64`、`macos-aarch64`、`linux-x86_64` とする。`macos-x86_64` はローカルビルドだけを維持する。
-- Windows x86-64を主なローカル検証環境とし、GitHub-hosted CIはLinuxだけを使う。
+- Windows x86-64を主なローカル検証環境とし、公式3対象は各OSのGitHub-hosted runnerで検証する。
 - `transcribe` はエンジンもモデルも暗黙に取得せず、文字起こし中はネットワークへ接続しない。
 - エンジン成果物は本プロジェクトのGitHub ReleasesからHTTPSで取得し、サイズとSHA-256を検証する。
 - アーカイブ内の絶対パス、親ディレクトリ参照、シンボリックリンクを拒否する。
@@ -346,7 +346,7 @@ build scriptがclone後に固定commitをcheckoutし、patch適用失敗時に�
 - [ ] **Step 3: 検証スクリプトを書く**
 
 アーカイブの許可ファイル、実行物の起動、共有ライブラリ、prompt file契約、短いfixture、オフライン実行、キャンセル後の残存プロセスを検査する。
-WindowsとmacOSはローカルで実行し、LinuxだけGitHub-hosted runnerで再現性を検査する。
+公式3対象は各OSのGitHub-hosted runnerで実行する。macOS Intelは対象Mac上で利用者が検証する。
 
 - [ ] **Step 4: 実成果物を作成してマニフェストを確定する**
 

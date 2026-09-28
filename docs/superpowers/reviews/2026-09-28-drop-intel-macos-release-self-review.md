@@ -14,9 +14,9 @@ README、開発ガイド、テストガイド、エンジン文書、設計仕�
 
 ## 第2回: 実行時状態とローカルビルド境界
 
-Rustの実装、`engines/manifest.json`、CLIと推論エンジンのビルドスクリプトに差分がないことを確認した。`Platform::MacosX86_64`、`build-cli.py`のDarwin x86-64判定、`build-whisper-engine.sh`のDarwin-x86_64判定は残っている。このため、配布行列からの除外によってローカルarchive生成まで削除されることはない。
+公式配布対象の変更では、Rustの実装、`engines/manifest.json`、CLIと推論エンジンのビルドスクリプトを変更していない。`Platform::MacosX86_64`、`build-cli.py`のDarwin x86-64判定、`build-whisper-engine.sh`のDarwin-x86_64判定は残っている。このため、配布行列からの除外によってローカルarchive生成まで削除されることはない。
 
-今回の変更はモデルのinstall、cancel、remove、lease、partial fileを変更しない。新しい状態遷移もないためLeanモデルは変更していない。既存のLean定理、固定witness、生成fixture、Rust strict oracleを再実行し、状態管理の対応が維持されていることを確認した。
+公式配布対象の変更は、モデルのinstall、cancel、remove、lease、partial fileへ新しい状態遷移を追加しない。後続の検証で追加したlease修正は、reader解放を暗黙のcloseから明示的なunlockへ変えるだけであり、抽象状態の遷移を変えない。このためLeanモデルは変更していない。既存のLean定理、固定witness、生成fixture、Rust strict oracleを再実行し、状態管理の対応が維持されていることを確認した。
 
 ## 第3回: 回帰検査と残存記述
 
@@ -26,7 +26,7 @@ Rustの実装、`engines/manifest.json`、CLIと推論エンジンのビルド�
 - `cargo fmt --all -- --check`
 - `cargo check --workspace --all-targets --locked`
 - `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`
-- `cargo test --workspace --all-features --locked`: 190件成功、5件はローカル資源が必要なためignore
+- `cargo test --workspace --all-features --locked`: 191件成功、5件はローカル資源が必要なためignore
 - `lake -d formal build`
 - `lake -d formal exe YasumaroTests`
 - `lake -d formal exe model-lifecycle-testgen -- --check crates/yasumaro-runtime/tests/fixtures/lean-model-lifecycle.json`
@@ -34,6 +34,10 @@ Rustの実装、`engines/manifest.json`、CLIと推論エンジンのビルド�
 - `prek run --all-files`
 - `git diff --check`
 
-最初の`prek`実行では`whisper_constructor_failure_releases_the_model_lease`が1回失敗した。同じ対象を単独、テストバイナリ全体、workspace全体の順に再実行すると、すべて成功した。続けて`prek run --all-files`を再実行し、全hookの成功を確認した。このテストとlease実装には今回の差分がなく、再現する変更起因の不具合は確認できなかった。
+最初の`prek`実行では`whisper_constructor_failure_releases_the_model_lease`が1回失敗した。同じ対象を単独、テストバイナリ全体、workspace全体の順に再実行すると、すべて成功した。しかし、後の`prek`実行では`whisper_transcriber_holds_the_model_lease_until_drop`が同じ`ModelInUse`で失敗したため、偶発的な失敗という判断を撤回した。
+
+`ModelLease`は従来、`File`のcloseによる暗黙のunlockだけに依存していた。`Drop`で明示的にunlockし、closeによる解放も残した。修正後は`whisper_process`の6件を10回反復して全60件が成功した。共有leaseを2本取得し、1本をdropしても残るleaseがremoveを拒否する回帰テストも追加した。
 
 最後に`macos-15-intel`、4構成、8 archive、Intel向け公式配布を示す表現を横断検索した。残る`macos-x86_64`は、ローカルビルド、プラットフォーム解決、または公式対象外であることの説明に限られる。
+
+コミット後の再検索では、旧実装計画にLinuxだけをGitHub-hosted CIで検証する記述が2か所残っていた。公式3対象を各OSのrunnerで検証する記述へ直し、同じ検索を再実行した。
