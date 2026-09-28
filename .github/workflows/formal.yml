@@ -1,0 +1,33 @@
+name: Formal verification
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  formal:
+    name: Lean proofs
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: formal
+          auto-config: false
+          build: true
+          test: false
+          lint: false
+      - name: Run Lean executable tests
+        working-directory: formal
+        run: lake exe YasumaroTests

@@ -213,3 +213,25 @@ Clapが表示する`model remove <MODELS>...`と全model choiceを確認した�
 修正: 既存のmodel help testへremoveの掲載確認を追加した。全`ModelError`はCancelledの個別分類またはmodel errorの包括分岐で処理され、match漏れはない。
 
 検証時にClippyがmodel cancellationとruntime cancellationの同一結果を別armにした点を検出したため、両patternを一つのexit 130 armへ統合した。分類の意味は変えていない。
+
+## Task 6: 文書、formal CI、全体検証
+
+### 第1巡: 要件レビュー
+
+READMEは`model remove`に一つ以上のmodel名が必要であること、使用中は待機せず失敗すること、取得が必要なinstallはoffset 0から始めることを説明する。通常の通信、検証、cancel失敗では`.part`を削除し、強制終了や電源断で残った場合だけ次回のinstallまたはremoveが削除を試みる。Range再開、sidecar、backupを利用者機能として記載していない。
+
+READMEのcommand例はClap parser test、ライフサイクル説明は本文契約testで固定した。設計書と実装計画書へのlinkを開発文書へ追加した。Issue本文や外部状態は変更していない。
+
+### 第2巡: 状態・安全性レビュー
+
+Leanの`step_preserves`と`run_preserves`は、検証前の公開禁止とreader・writer排他を任意のevent列へ拡張する。cleanup、busy remove、remove成功、冪等性の個別定理をRustの`model_download`、`model_lifecycle`、`model_cli` testへ対応づけた。LeanがSHA-256計算、rename、unlink、symlink、OS lock、強制終了cleanupを証明しないことをformal READMEとtesting文書の双方に明記した。
+
+指摘: 初稿の対応表はreader・writer排他に同時install testを挙げていたが、このtestが検査するのは二つのwriterの直列化であり、readerとの競合ではなかった。
+
+修正: 共有lease中はinstallがHTTP request前で待機し、lease解放後に取得と置換を完了する`install_waits_for_an_active_model_lease`を追加した。対応表をlease中removeとlease中installの二つへ修正し、証明と実装testの対応を過大に表現しないようにした。
+
+### 第3巡: 実装品質レビュー
+
+formal workflowは`pull_request`、`merge_group`、`workflow_dispatch`で起動し、Ubuntu 22.04、20分上限、read-only contents permissionを使う。`leanprover/lean-action@v1`へ`formal` package、auto-config無効、build有効、testとlint無効を渡し、その後に`formal`をworking directoryとして`lake exe YasumaroTests`を実行する。
+
+開発文書とtesting文書の相対linkは実在するfileを指す。README parser testは新しいremove例を含む。今回のmodel lifecycle実装に`If-Range`、`Content-Range`、`part.json`、publish backupはなく、該当語は設計・計画の対象外説明または無関係な出力fileのatomic writeに限られる。placeholderや未決定事項は追加していない。

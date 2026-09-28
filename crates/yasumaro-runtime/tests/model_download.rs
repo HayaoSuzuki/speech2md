@@ -504,6 +504,53 @@ fn concurrent_installs_issue_one_request_and_reuse_verified_final() {
 }
 
 #[test]
+fn install_waits_for_an_active_model_lease() {
+    let replacement = b"replacement model";
+    let (request_tx, request_rx) = mpsc::channel();
+    let (url, server) = spawn_server(move |mut stream| {
+        let _request = read_request(&mut stream);
+        request_tx.send(()).expect("signal request");
+        respond(&mut stream, "200 OK", replacement.len(), replacement);
+    });
+    let root = TempDir::new().expect("temporary model root");
+    std::fs::write(root.path().join(FINAL_NAME), b"leased old model").expect("write leased model");
+    let store = ModelStore::new(root.path());
+    let lease = store.acquire(MODEL).expect("acquire model lease");
+    let installer = installer(
+        &root,
+        &url,
+        replacement,
+        sha256(replacement),
+        Duration::from_secs(1),
+    );
+    let start = Arc::new(Barrier::new(2));
+    let worker_start = Arc::clone(&start);
+    let worker = thread::spawn(move || {
+        worker_start.wait();
+        installer.install(&[MODEL])
+    });
+
+    start.wait();
+    assert!(
+        request_rx.recv_timeout(Duration::from_millis(100)).is_err(),
+        "install must not inspect or replace a leased model"
+    );
+    drop(lease);
+    request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("request begins after lease release");
+    worker
+        .join()
+        .expect("installer worker exits")
+        .expect("install succeeds after lease release");
+    server.join().expect("server exits");
+    assert_eq!(
+        std::fs::read(root.path().join(FINAL_NAME)).expect("read replacement model"),
+        replacement
+    );
+}
+
+#[test]
 fn errors_and_logs_do_not_expose_url_or_full_path() {
     let secret = "secret-model-location";
     let (base_url, server) = spawn_server(move |mut stream| {

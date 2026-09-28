@@ -96,5 +96,16 @@ PRの作成・更新と手動実行では、同じビルド処理を公開なし
 
 - [設計仕様](superpowers/specs/2026-09-25-yasumaro-design.md)
 - [実装計画](superpowers/plans/2026-09-25-yasumaro-implementation.md)
-- [Leanによる話者割り当てモデル](../formal/README.md)
+- [モデル削除と失敗時クリーンアップの設計](superpowers/specs/2026-09-28-model-remove-clean-install-design.md)
+- [モデル削除と失敗時クリーンアップの実装計画](superpowers/plans/2026-09-28-model-remove-clean-install.md)
+- [Leanによる話者割り当てとモデルライフサイクルの検証](../formal/README.md)
 - [whisper.cppエンジンのビルド](../engines/README.md)
+
+モデルライフサイクルの状態遷移と不変条件を変更した場合は、Rustテストに加えてLeanのbuildと実行テストを確認します。
+
+```console
+lake -d formal build
+lake -d formal exe YasumaroTests
+```
+
+Leanは検証済みモデル、部分ファイル、reader、writerの抽象状態を扱います。ハッシュ計算、rename、symlink、OSのfile lockはRustの統合テストで検査します。

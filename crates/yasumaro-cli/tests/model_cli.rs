@@ -160,3 +160,24 @@ fn model_in_use_reports_retry_help() {
             "retry `yasumaro model remove whisper-base` after transcription or installation completes",
         ));
 }
+
+#[test]
+fn readme_explains_model_removal_and_cleanup() {
+    let readme = include_str!("../../../README.md");
+
+    for required in [
+        "yasumaro model remove whisper-small",
+        "一つ以上",
+        "`.part`",
+        "通常の失敗",
+        "強制終了",
+        "次回の`model install`または`model remove`",
+        "model whisper-small is in use",
+        "途中から再開せず",
+    ] {
+        assert!(
+            readme.contains(required),
+            "README is missing the model lifecycle contract: {required}"
+        );
+    }
+}

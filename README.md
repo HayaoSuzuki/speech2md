@@ -202,6 +202,23 @@ yasumaro model install whisper-large-v3-turbo
 サイズは10進MBでの概算です。
 導入中は部分ファイルと完成ファイルが一時的に併存するため、表の合計より多い空き容量を確保してください。
 
+## モデルの削除と再導入
+
+不要になったモデルは、`model remove`に一つ以上のモデル名を指定して削除します。
+
+```console
+yasumaro model remove whisper-small
+yasumaro model remove whisper-medium whisper-large-v3
+```
+
+文字起こしまたは導入処理がモデルを使用している場合、removeは待機せず、例えば`model whisper-small is in use`と表示して失敗します。
+処理の完了後に同じ`model remove`を再実行してください。
+
+`model install`は、取得が必要なモデルを途中から再開せず、毎回先頭から取得します。
+ダウンロード中の内容は、確定モデルと区別できる`.part`ファイルへ書き込みます。
+通信エラー、検証エラー、キャンセルなどの通常の失敗では、この`.part`ファイルを削除します。
+強制終了や電源断では`.part`ファイルが残ることがあります。その場合は、次回の`model install`または`model remove`が削除を試みます。
+
 ## 処理時間と空き容量
 
 処理時間はCPU、音声時間、モデル、話者数、話速によって変わります。
