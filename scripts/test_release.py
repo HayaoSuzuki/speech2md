@@ -66,17 +66,16 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(git('rev-parse', 'v0.1.0'), first)
             self.assertEqual(git('rev-parse', 'v0.1.1'), second)
 
-    def test_manifest_measures_all_four_archives_and_rejects_missing_files(self):
+    def test_manifest_measures_three_official_archives_and_rejects_missing_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             names = ['yasumaro-whispercpp-v1.9.4-windows-x86_64.zip',
                      'yasumaro-whispercpp-v1.9.4-linux-x86_64.tar.gz',
-                     'yasumaro-whispercpp-v1.9.4-macos-aarch64.tar.gz',
-                     'yasumaro-whispercpp-v1.9.4-macos-x86_64.tar.gz']
+                     'yasumaro-whispercpp-v1.9.4-macos-aarch64.tar.gz']
             for name in names:
                 (root / name).write_bytes(b'abc')
             manifest = release.engine_manifest(root, 'HayaoSuzuki/yasumaro', 'v0.1.2')
-            self.assertEqual(len(manifest['artifacts']), 4)
+            self.assertEqual(len(manifest['artifacts']), 3)
             for artifact in manifest['artifacts']:
                 self.assertEqual(artifact['size'], 3)
                 self.assertEqual(artifact['sha256'], 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')

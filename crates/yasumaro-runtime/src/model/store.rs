@@ -25,13 +25,21 @@ pub struct ModelStore {
 #[derive(Debug)]
 pub struct ModelLease {
     path: PathBuf,
-    _lock: File,
+    lock: File,
 }
 
 impl ModelLease {
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+}
+
+impl Drop for ModelLease {
+    fn drop(&mut self) {
+        // Closing the file also releases the lock, but explicit unlock avoids
+        // relying on close timing before immediate reacquisition on macOS.
+        let _ = fs4::fs_std::FileExt::unlock(&self.lock);
     }
 }
 
@@ -122,7 +130,7 @@ impl ModelStore {
         }
         verify_file(spec, &path, cancelled)?;
         check_cancelled(id, cancelled)?;
-        Ok(ModelLease { path, _lock: lock })
+        Ok(ModelLease { path, lock })
     }
 
     /// Removes a model and any stale partial file without waiting for active users.

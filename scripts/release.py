@@ -8,7 +8,7 @@ import re
 import subprocess
 import tomllib
 
-PLATFORMS = ('windows-x86_64', 'linux-x86_64', 'macos-aarch64', 'macos-x86_64')
+PLATFORMS = ('windows-x86_64', 'linux-x86_64', 'macos-aarch64')
 SEMVER = re.compile(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)')
 VERSION = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-preview\.[0-9]+)?')
 
