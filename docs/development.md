@@ -72,7 +72,6 @@ Windowsでは`python scripts/build-cli.py dist`で`.zip`を生成できます。
 | Windows x86-64 | `yasumaro-v0.1.0-windows-x86_64.zip` |
 | Linux x86-64（glibc） | `yasumaro-v0.1.0-linux-x86_64.tar.gz` |
 | macOS Apple Silicon | `yasumaro-v0.1.0-macos-aarch64.tar.gz` |
-| macOS Intel | `yasumaro-v0.1.0-macos-x86_64.tar.gz` |
 
 例えば、Apple Silicon版は次のように展開して起動できます。
 
@@ -81,15 +80,26 @@ tar -xzf dist/yasumaro-v0.1.0-macos-aarch64.tar.gz
 ./bin/yasumaro --help
 ```
 
+### macOS Intelでのローカルビルド
+
+macOS Intelは公式ReleaseとGitHub Actionsの対象外です。Intel Mac上では、既存のローカルbuild scriptを実行できます。
+
+```sh
+./scripts/build-posix-cli.sh ./dist
+./scripts/build-whisper-engine.sh ./dist
+```
+
+これらのscriptは`macos-x86_64`を判定し、CLIと推論エンジンのarchiveを生成します。生成物は利用者が検証・管理するローカル成果物です。GitHub Releaseへの掲載、公式マニフェストへの登録、CIによる互換性の検証は行いません。
+
 ## マージ時の自動リリース
 
 `main`へのPRをマージすると、GitHub Actionsの`Build and release`ワークフローが次の処理を実行します。
 
 1. マージコミットへ`vMAJOR.MINOR.PATCH`タグを付けます。既存の`v`タグの最大バージョンからパッチ番号を1増やします。初回はCLIの`Cargo.toml`のバージョンを使います。
-2. Windows x86-64、Linux x86-64、macOS Apple Silicon／Intelのエンジンをビルドし、実モデルで推論とキャンセルを検証します。
+2. Windows x86-64、Linux x86-64、macOS Apple Siliconのエンジンをビルドし、実モデルで推論とキャンセルを検証します。
 3. 各エンジンのサイズ、SHA-256、ReleaseのURLからマニフェストを生成します。
 4. タグと同じバージョンおよび生成したマニフェストを各OSのCLIへ埋め込み、ビルド・展開後の起動を検証します。
-5. 全構成が成功した場合に、CLIとエンジンの計8アーカイブ、マニフェスト、チェックサムをGitHub Releaseへ登録して公開します。
+5. 全構成が成功した場合に、CLIとエンジンの計6アーカイブ、マニフェスト、チェックサムをGitHub Releaseへ登録して公開します。
 
 ソースのバージョンとマニフェストの変更はビルド環境内で行い、`main`への書き戻しはありません。
 失敗した実行はGitHub Actionsから再実行できます。同じコミットではタグを再利用し、公開済みReleaseのファイルは置き換えません。

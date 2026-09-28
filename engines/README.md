@@ -21,13 +21,18 @@ from the build host. Substitute that platform in the archive name above.
 It requires Git, CMake, a C/C++ compiler, and Python 3. Metal and CUDA are
 explicitly disabled for CPU-only inference; no separate Metal resources are needed.
 
-The `Build and release` workflow builds all four platforms on native runners.
+The `Build and release` workflow builds Windows x86-64, Linux x86-64, and macOS
+Apple Silicon on native runners.
 Every engine is checked with a hash-verified base model and the repository's tone
 fixture, including offline inference and cancellation. The workflow then generates
 a manifest from the exact archives, embeds it in each CLI, and publishes the CLI
 and engine archives together after a PR is merged into `main`. CLI versions match
 the automatically reserved `vMAJOR.MINOR.PATCH` tag. The manifest's version includes
 that tag so engine installations from different releases remain separate.
+
+The shell build script continues to recognize `macos-x86_64` for local source builds.
+Intel Mac archives are user-managed: CI does not build or verify them, generated
+release manifests omit them, and official releases do not publish them.
 
 PR and manual runs build preview artifacts without publishing. Their generated
 manifest URLs are not installable release URLs. The checked-in manifest remains

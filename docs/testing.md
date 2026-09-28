@@ -34,7 +34,7 @@ Remove-Item Env:YASUMARO_ENGINE_DIR, Env:YASUMARO_MODEL_DIR, Env:YASUMARO_DIARIZ
 
 ## 通常のテスト
 
-モデルとネットワークを使わないworkspaceテストは、GitHub ActionsでWindows x86-64、Linux x86-64、macOS Apple Silicon／Intelの4構成で実行します。
+モデルとネットワークを使わないworkspaceテストは、GitHub ActionsでWindows x86-64、Linux x86-64、macOS Apple Siliconの3構成で実行します。macOS IntelはCIの対象外であり、必要な利用者が対象Mac上でテストします。
 
 ```console
 cargo fmt --all -- --check
@@ -177,7 +177,7 @@ WindowsではVisual StudioのMSVC C++ x64/x86ビルドツール、C++ AddressSan
 | ファイル | 検査内容 |
 |---|---|
 | [`ci.yml`](../.github/workflows/ci.yml) | Rustfmt、default-featureの全target check、全featureの厳格なClippyを実行 |
-| [`tests.yml`](../.github/workflows/tests.yml) | 4構成のworkspaceテスト |
+| [`tests.yml`](../.github/workflows/tests.yml) | 3構成のworkspaceテスト |
 | [`formal.yml`](../.github/workflows/formal.yml) | Leanのbuild、実行テスト、fixture freshness、Rust oracleのstrict対応検査 |
 | [`shuffled-tests.yml`](../.github/workflows/shuffled-tests.yml) | nightlyで実行順をランダム化した逐次テストを3回実行 |
 | [`coverage.yml`](../.github/workflows/coverage.yml) | coreとformatsそれぞれの行・関数カバレッジ100%を検査 |

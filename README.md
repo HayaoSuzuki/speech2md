@@ -5,7 +5,8 @@ yasumaroは、日本語の会議音声をローカルで文字起こしし、話
 
 ## 対象環境
 
-Windows x86-64、Linux x86-64（glibc）、macOS（Apple Silicon／Intel）に対応しています。
+公式配布はWindows x86-64、Linux x86-64（glibc）、macOS Apple Siliconを対象とします。
+macOS Intel向けの公式バイナリとCIは提供しませんが、ソースからのローカルビルドは維持します。
 GPUは使用せず、CPUだけで処理します。
 
 ## 対応する入力と出力
@@ -30,7 +31,8 @@ RustやPythonのインストールは不要です。
 | Windows x86-64 | `yasumaro-<version>-windows-x86_64.zip` |
 | Linux x86-64（glibc） | `yasumaro-<version>-linux-x86_64.tar.gz` |
 | macOS Apple Silicon | `yasumaro-<version>-macos-aarch64.tar.gz` |
-| macOS Intel | `yasumaro-<version>-macos-x86_64.tar.gz` |
+
+macOS IntelではRelease archiveを提供しません。必要な場合は[開発ガイド](docs/development.md#macos-intelでのローカルビルド)に従って、対象Mac上でCLIと推論エンジンをビルドしてください。
 
 アーカイブを任意のディレクトリへ展開し、中にある`bin`ディレクトリを`PATH`へ追加します。
 Windowsの実行ファイルは`bin\yasumaro.exe`、LinuxとmacOSは`bin/yasumaro`です。

@@ -10,9 +10,13 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-25-yasumaro-design.md`
 
+## 2026-09-28 配布対象の改訂
+
+公式ReleaseとGitHub Actionsは、Windows x86-64、Linux x86-64、macOS Apple Siliconの3対象に限定する。`macos-x86_64`のプラットフォーム判定とビルドスクリプトは、Intel Mac上で利用者がローカルビルドするために残す。Intel Mac用の成果物は、公式マニフェストへの登録、CIでの検証、GitHub Releaseへの掲載を行わない。
+
 ## Global Constraints
 
-- 対応成果物は `windows-x86_64`、`macos-aarch64`、`macos-x86_64`、`linux-x86_64` とする。
+- 公式成果物は `windows-x86_64`、`macos-aarch64`、`linux-x86_64` とする。`macos-x86_64` はローカルビルドだけを維持する。
 - Windows x86-64を主なローカル検証環境とし、GitHub-hosted CIはLinuxだけを使う。
 - `transcribe` はエンジンもモデルも暗黙に取得せず、文字起こし中はネットワークへ接続しない。
 - エンジン成果物は本プロジェクトのGitHub ReleasesからHTTPSで取得し、サイズとSHA-256を検証する。
@@ -346,7 +350,8 @@ WindowsとmacOSはローカルで実行し、LinuxだけGitHub-hosted runnerで�
 
 - [ ] **Step 4: 実成果物を作成してマニフェストを確定する**
 
-4対象のURL、size、SHA-256はGitHub Releasesへアップロードした実ファイルから計測する。
+公式3対象のURL、size、SHA-256はGitHub Releasesへアップロードした実ファイルから計測する。
+`macos-x86_64` は公式マニフェストへ登録しない。
 未作成対象を架空値で埋めず、その対象の `engine install` は `MissingArtifact` を返す状態を維持する。
 
 - [ ] **Step 5: READMEへ利用手順を記載する**
@@ -391,7 +396,7 @@ git commit -m "build: package portable whisper engines"
 - [ ] **Step 2: 後続Taskの依存を更新する**
 
 pipelineは `InstalledEngine` を受け取るtranscriberを使い、CLIは既存のengine subcommandsへmodel、transcribe、doctorを追加する。
-CIとREADMEは4対象成果物とLinux-only GitHub-hosted CIを参照する。
+CIとREADMEは公式3対象の成果物を参照する。`macos-x86_64` はローカルビルド手順だけを記載する。
 
 - [ ] **Step 3: 計画の残存矛盾を検査する**
 

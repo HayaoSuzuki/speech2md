@@ -73,8 +73,6 @@ jobs:
             runner: ubuntu-22.04
           - platform: macos-aarch64
             runner: macos-14
-          - platform: macos-x86_64
-            runner: macos-15-intel
     steps:
       - uses: actions/checkout@v7
         with:
@@ -156,8 +154,6 @@ jobs:
             runner: ubuntu-22.04
           - platform: macos-aarch64
             runner: macos-14
-          - platform: macos-x86_64
-            runner: macos-15-intel
     steps:
       - uses: actions/checkout@v7
         with:
@@ -221,7 +217,7 @@ jobs:
               assert len(data) == spec['size']
               assert hashlib.sha256(data).hexdigest() == spec['sha256']
           archives = sorted([*root.glob('*.tar.gz'), *root.glob('*.zip')])
-          assert len(archives) == 8, 'expected four CLI and four engine archives'
+          assert len(archives) == 6, 'expected three CLI and three engine archives'
           (root / 'SHA256SUMS').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' for p in archives))
       - name: Publish complete release (reruns preserve published assets)
         env:
