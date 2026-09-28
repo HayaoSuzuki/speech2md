@@ -312,7 +312,7 @@ Review Focusの5項目には、それぞれTask 3またはTask 4のtest名と実
 
 指摘: 自動簡約だけに依存した初稿では、Bool条件が過剰に書き換えられ、no-op分岐と状態更新分岐の対応が証明項から読み取りにくかった。
 
-修正: 各条件を`ite_eq_left`または`ite_eq_right`で明示的に選び、更新分岐ごとに四つの安全条件を構成した。未検証partialとキャンセル済みpartialを許可する`brokenAuthorizeStep`には固定witnessを置き、正常遷移の安全性と壊れた遷移の非安全性を同じ定理で確認した。
+修正: 各条件を`ite_eq_left`または`ite_eq_right`で明示的に選び、更新分岐ごとに四つの安全条件を構成した。未検証条件だけを落とす`brokenUnverifiedAuthorizeStep`には固定witnessを置き、正常遷移の安全性と壊れた遷移の非安全性を同じ定理で確認した。キャンセル条件とremove冪等性の専用変異は後段の「形式監査の検出感度追加」に記録した。
 
 ### 第3巡: 実装品質レビュー
 
@@ -326,7 +326,7 @@ Review Focusの5項目には、それぞれTask 3またはTask 4のtest名と実
 
 ### 第1巡: 要件レビュー
 
-fixtureは正常公開、hash不一致、公開許可前キャンセル、公開許可後キャンセル、busy remove、remove成功の6 production対応caseと、壊れた公開許可の1 sensitivity caseだけを含む。modeは`strict`、`internal-fixture`、`model-only`に限定し、Range、再開、validator、backupに対応するcaseは追加していない。schema versionは1、case順序と期待結果は`YasumaroTests`で固定した。
+fixtureは正常公開、hash不一致、公開許可前キャンセル、公開許可後キャンセル、busy remove、remove成功の6 production対応caseと、3 sensitivity caseを含む。modeは`strict`、`internal-fixture`、`model-only`に限定し、Range、再開、validator、backupに対応するcaseは追加していない。schema versionは1、case順序と期待結果は`YasumaroTests`で固定した。
 
 指摘: 計画のgenerator commandは`lake -d formal`を実行すればcwdも`formal/`へ移る前提で`../crates/...`を指定していたが、Lakeはrepository rootのcwdを維持した。
 
@@ -334,11 +334,11 @@ fixtureは正常公開、hash不一致、公開許可前キャンセル、公開
 
 ### 第2巡: 状態・安全性レビュー
 
-各caseの`expected`はprivateな`makeCase`が`run start events`から計算し、呼出側が独立した期待状態を書けない。Lean実行testでも全caseについて`expected = run start events`を再確認する。壊れた期待状態はsensitivity caseだけに存在し、同じstartとeventsを`brokenAuthorizeStep`へ渡して生成する。JSONにはstart、event列、正常期待状態、壊れた期待状態をすべて出力する。
+各caseの`expected`はprivateな`makeCase`が`run start events`から計算し、呼出側が独立した期待状態を書けない。Lean実行testでも全caseについて`expected = run start events`を再確認する。壊れた期待状態はsensitivity caseだけに存在し、同じstartとeventsを対応する専用broken遷移へ渡して生成する。JSONにはstart、event列、正常期待状態、壊れた期待状態をすべて出力する。
 
 指摘: 初稿のテストはfield値を確認したが、rendererが不正なJSONを生成する変異を検出できなかった。
 
-修正: `Lean.Json.parse modelLifecycleTestVectorsJson`の成功を実行testへ追加し、生成後は`jq`でもschema version 1、7 case、mode、期待結果を確認した。
+修正: `Lean.Json.parse modelLifecycleTestVectorsJson`の成功を実行testへ追加し、生成後は`jq`でもschema version 1、9 case、mode、期待結果を確認した。
 
 ### 第3巡: 実装品質レビュー
 
@@ -410,7 +410,7 @@ READMEは削除、通常失敗時cleanup、強制終了後の次回cleanup、25�
 
 ### 第2巡: 状態・安全性レビュー
 
-Leanの`Safe`は、確定モデルの検証、検証済みpartialの存在、公開許可時の検証済みpartialとwriter保持、readerとwriterの排他を表す。fixtureの7 caseはLeanの`run`から期待状態を生成し、Rust oracleは6件のproduction対応caseを公開APIとtest-support checkpointで観測する。壊れた許可遷移の1件は検出感度だけに使い、production対応として数えない。
+Leanの`Safe`は、確定モデルの検証、検証済みpartialの存在、公開許可時の検証済みpartialとwriter保持、readerとwriterの排他を表す。fixtureの9 caseはLeanの`run`から期待状態を生成し、Rust oracleは6件のproduction対応caseを公開APIとtest-support checkpointで観測する。三つの壊れた遷移は検出感度だけに使い、production対応として数えない。
 
 対応表は、未検証公開、公開許可前後のキャンセル、busy remove、remove成功を個別のRust testとoracle caseへ結びつける。Leanが扱わないSHA-256計算、rename、unlink、symlink、OS lock、強制終了時cleanupはRust統合testと各OSのCIへ割り当てた。oracleは抽象状態との対応を検査するが、Rust実装全体の形式証明ではないことを文書に明記した。
 
@@ -461,3 +461,58 @@ redirectはpartial作成前のHTTP接続経路だけを変え、検証、公開�
 3巡の再確認では、redirect chainがboundedでHTTPS downgradeを拒否すること、キャンセル追加がremoveの非待機規則や公開許可後の成功規則を変えないこと、test-support APIが通常buildへ露出しないことを確認した。設計書、README、testing文書は実装と同じ境界へ更新した。
 
 workspace再検証では、単独実行で成功するWhisper lease解放testが並列実行で2回続けて`ModelInUse`になった。Rust 1.98のinherentな`File::lock_shared`と、removeが使うfs4の排他lock APIが混在していたため、共有lockもfs4を明示して同じ実装へ統一した。修正後はworkspace全testが成功し、該当test binaryの並列実行も5回連続で成功した。
+
+## 形式監査の検出感度追加
+
+### 監査対象と対応
+
+監査する主張は、未検証partialと公開許可前にキャンセルされたpartialを公開せず、成功したremoveを繰り返してもartifactが再生成されないことである。Leanはartifact、検証、公開許可、キャンセル要求、reader、writerの抽象状態だけを扱う。SHA-256計算、ファイルシステム、OS lock、実時間はRustテストの対象であり、三つの壊れた遷移はproductionへ対応させない`model-only` caseとする。
+
+| 前提または観測 | Lean表現 | production設定 | 公開観測 | 根拠 | mode |
+|---|---|---|---|---|---|
+| 未検証partialの公開許可 | `partialVerified = false`から`authorizePublish` | 意図的な壊れた遷移は設定不可 | 正常モデルと壊れたモデルの期待状態 | Lean定理と生成fixture | `model-only` |
+| 検証済み・キャンセル済みpartialの公開許可 | `partialVerified = true`かつ`cancelRequested = true`から`authorizePublish` | 意図的な壊れた遷移は設定不可 | `publishAuthorized`の差 | Lean定理と生成fixture | `model-only` |
+| removeの再実行 | `stalePartialInitial`から`remove`を2回 | 正常実装の冪等性は公開APIで検査済みだが、壊れた遷移は設定不可 | 2回目の`partial`の差 | Lean定理、生成fixture、Rustの既存remove test | `model-only` |
+
+production対応の6件は変更しない。verified publish、hash mismatch、busy remove、remove successは`strict`、公開許可前後のキャンセルは`internal-fixture`である。実装対応と検出感度を同じmodeとして扱わない。
+
+### 第1巡: 要件レビュー
+
+三つの変異は、形式監査のatomicity、boundary/precedence、idempotencyに対応する。未検証許可は検証条件だけを落とし、キャンセル許可は検証条件を満たしたままキャンセル条件だけを落とす。remove変異は1回目を正常遷移と同じ結果にし、2回目だけpartialを再生成する。各変異が別の違反によって検出される構成は残していない。
+
+指摘: 従来の固定witnessは`partialVerified = false`と`cancelRequested = true`を同時に設定していたため、安全条件違反が未検証状態だけで成立し、キャンセル条件を落とした変異の検出感度を単独では示さなかった。
+
+修正: 未検証用witnessの`cancelRequested`をfalseにし、検証済み・キャンセル済みの専用witnessを追加した。removeには2 eventの専用witnessを追加した。
+
+### 第2巡: 状態・安全性レビュー
+
+正常な`authorizePublish`は、writer、partial、検証済み、未キャンセルの四条件を要求する。未検証変異は未キャンセル条件を保持し、検証条件だけを除く。キャンセル変異は検証条件を保持し、未キャンセル条件だけを除く。後者は`Safe`自体を破らないため、正常遷移の`publishAuthorized = false`と壊れた遷移の`true`を専用定理で比較する。この分離により、`Safe`の範囲を時間順序の規則へ不自然に拡張していない。
+
+正常なremoveには任意状態に対する冪等性定理がある。remove変異は`stalePartialInitial`の1回目を正常removeと一致させ、空状態への2回目だけ未検証partialを作る。固定traceは公開許可系が長さ1、removeが長さ2である。eventは`abort`の真偽を分けて11種類だが、網羅探索は実施していない。正しい遷移の一般性は既存の不変条件保存定理、キャンセル優先定理、remove冪等性定理が担う。
+
+最小witnessは次のとおりである。
+
+- 未検証許可: writerとpartialがあり、未検証、未キャンセルの状態で`authorizePublish`を1回実行する。正常遷移は未許可、壊れた遷移は許可となり、後者だけ`Safe`を破る。
+- キャンセル優先: writer、partial、検証済み、キャンセル済みの状態で`authorizePublish`を1回実行する。両状態とも`Safe`だが、正常遷移だけが未許可を維持する。
+- remove冪等性: 検証済みfinalとstale partialがある状態で`remove`を2回実行する。1回目は正常・壊れた遷移ともartifactを消去し、2回目は壊れた遷移だけがpartialを再生成する。
+
+三件とも意図的な変異を対象にした`model-only`の検出感度であり、production bugではない。production対応のoracle 6件は従来の前提と観測を維持する。
+
+### 第3巡: 実装品質レビュー
+
+TDDでは、キャンセル専用定理とremove冪等性定理を先に`YasumaroTests`へ追加し、それぞれ未定義identifierでREDになることを確認した。最小実装後は定理、固定case名、mode、結果、broken expectationの配置がGREENになった。GREEN後に従来の曖昧な`broken-authorization`を`broken-unverified-authorization`へ改名した。
+
+schema versionは1のまま、fixtureはproduction対応6件と`model-only` 3件の計9件になった。期待状態はすべてLeanの`run`または各壊れた遷移から生成し、JSONを手編集していない。Rust oracleのreportは9件すべてを`match`と判定し、基盤errorは0件だった。
+
+網羅探索、`native_decide`、深いtactic searchは追加していない。個別のLean実行は約10秒、fixture再生成とfreshness確認を含む実行は約16秒で完了し、CIの20分上限を変更していない。peak memoryは観測していないため、探索boundを増やす判断も行っていない。
+
+再現commandは次のとおりである。
+
+```console
+lake -d formal build
+lake -d formal exe YasumaroTests
+lake -d formal exe model-lifecycle-testgen -- --check crates/yasumaro-runtime/tests/fixtures/lean-model-lifecycle.json
+cargo test -p yasumaro-runtime --example model_lifecycle_oracle --features test-support --locked
+cargo run -p yasumaro-runtime --example model_lifecycle_oracle --features test-support --locked -- --strict
+cargo run -p yasumaro-runtime --example model_lifecycle_oracle --features test-support --locked -- --report
+```

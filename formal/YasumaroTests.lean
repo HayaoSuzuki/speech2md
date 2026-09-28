@@ -17,7 +17,9 @@ open Yasumaro
 #check unverified_partial_cannot_be_authorized
 #check cancel_before_authorization_blocks_publication
 #check cancel_after_authorization_preserves_authorization
-#check broken_authorization_violates_safety
+#check broken_unverified_authorization_violates_safety
+#check broken_cancel_authorization_is_detected
+#check broken_remove_violates_idempotency
 
 private def tenPercent : OverlapThreshold := ⟨1, 10, by omega, by omega⟩
 private def quarter : OverlapThreshold := ⟨1, 4, by omega, by omega⟩
@@ -101,21 +103,23 @@ def main : IO Unit := do
     (modelLifecycleCases.map (·.name))
     ["verified-publish", "unverified-publish",
       "cancel-before-authorization", "cancel-after-authorization",
-      "busy-remove", "remove-success", "broken-authorization"]
+      "busy-remove", "remove-success", "broken-unverified-authorization",
+      "broken-cancel-authorization", "broken-remove-idempotency"]
   assertEqual "model lifecycle cases have stable modes"
     (modelLifecycleCases.map (·.mode))
     ["strict", "strict", "internal-fixture", "internal-fixture",
-      "strict", "strict", "model-only"]
+      "strict", "strict", "model-only", "model-only", "model-only"]
   assertEqual "model lifecycle cases have stable results"
     (modelLifecycleCases.map (·.expectedResult))
     ["success", "hash-mismatch", "cancelled", "success",
-      "model-in-use", "success", "broken-sensitivity"]
+      "model-in-use", "success", "broken-sensitivity", "broken-sensitivity",
+      "broken-sensitivity"]
   assertEqual "normal expectations come from the executable transition model"
     (modelLifecycleCases.map (·.expected))
     (modelLifecycleCases.map fun testCase => run testCase.start testCase.events)
-  assertEqual "only the sensitivity case has a broken expectation"
+  assertEqual "only sensitivity cases have broken expectations"
     (modelLifecycleCases.map (·.brokenExpected.isSome))
-    [false, false, false, false, false, false, true]
+    [false, false, false, false, false, false, true, true, true]
   assertEqual "model lifecycle fixture is valid JSON"
     (Lean.Json.parse modelLifecycleTestVectorsJson).isOk
     true

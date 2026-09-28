@@ -136,20 +136,38 @@ theorem cancel_after_authorization_preserves_authorization (state : State)
     (step state .requestCancel).publishAuthorized = true := by
   simpa [step] using authorized
 
-private def brokenAuthorizationWitness : State :=
+private def brokenUnverifiedAuthorizationWitness : State :=
   { published := false
     publishedVerified := false
     «partial» := true
     partialVerified := false
     publishAuthorized := false
+    cancelRequested := false
+    readers := 0
+    writer := true }
+
+theorem broken_unverified_authorization_violates_safety :
+    Safe (step brokenUnverifiedAuthorizationWitness .authorizePublish) ∧
+      ¬Safe (brokenUnverifiedAuthorizeStep brokenUnverifiedAuthorizationWitness
+        .authorizePublish) := by
+  simp [brokenUnverifiedAuthorizationWitness, step,
+    brokenUnverifiedAuthorizeStep, Safe]
+
+private def brokenCancelAuthorizationWitness : State :=
+  { published := false
+    publishedVerified := false
+    «partial» := true
+    partialVerified := true
+    publishAuthorized := false
     cancelRequested := true
     readers := 0
     writer := true }
 
-theorem broken_authorization_violates_safety :
-    Safe (step brokenAuthorizationWitness .authorizePublish) ∧
-      ¬Safe (brokenAuthorizeStep brokenAuthorizationWitness .authorizePublish) := by
-  simp [brokenAuthorizationWitness, step, brokenAuthorizeStep, Safe]
+theorem broken_cancel_authorization_is_detected :
+    (step brokenCancelAuthorizationWitness .authorizePublish).publishAuthorized = false ∧
+      (brokenCancelAuthorizeStep brokenCancelAuthorizationWitness
+        .authorizePublish).publishAuthorized = true := by
+  simp [brokenCancelAuthorizationWitness, step, brokenCancelAuthorizeStep]
 
 theorem busy_remove_noop (state : State)
     (busy : state.writer = true ∨ 0 < state.readers) :
@@ -170,5 +188,12 @@ theorem remove_idempotent (state : State) :
     step (step state .remove) .remove = step state .remove := by
   by_cases available : state.writer = false ∧ state.readers = 0 <;>
     simp [step, available]
+
+theorem broken_remove_violates_idempotency :
+    brokenRemoveStep stalePartialInitial .remove =
+        step stalePartialInitial .remove ∧
+      brokenRemoveStep (brokenRemoveStep stalePartialInitial .remove) .remove ≠
+        brokenRemoveStep stalePartialInitial .remove := by
+  simp [brokenRemoveStep, step, stalePartialInitial, publishedInitial]
 
 end Yasumaro

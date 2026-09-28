@@ -50,17 +50,27 @@ private def cancelAfterAuthorizationEvents : List Event :=
   [.beginInstall, .createPartial, .verifyPartial, .authorizePublish,
     .requestCancel, .publish]
 
-private def brokenAuthorizationStart : State :=
+private def brokenUnverifiedAuthorizationStart : State :=
   { published := false
     publishedVerified := false
     «partial» := true
     partialVerified := false
     publishAuthorized := false
-    cancelRequested := true
+    cancelRequested := false
     readers := 0
     writer := true }
 
 private def brokenAuthorizationEvents : List Event := [.authorizePublish]
+
+private def brokenCancelAuthorizationStart : State :=
+  { published := false
+    publishedVerified := false
+    «partial» := true
+    partialVerified := true
+    publishAuthorized := false
+    cancelRequested := true
+    readers := 0
+    writer := true }
 
 def modelLifecycleCases : List ModelLifecycleCase :=
   [makeCase "verified-publish" "install" "strict" "verified-publish"
@@ -77,11 +87,21 @@ def modelLifecycleCases : List ModelLifecycleCase :=
       busyRemoveInitial [.remove],
     makeCase "remove-success" "remove" "strict" "remove-success" "success"
       stalePartialInitial [.remove],
-    makeCase "broken-authorization" "sensitivity" "model-only"
-      "broken-authorization" "broken-sensitivity" brokenAuthorizationStart
-      brokenAuthorizationEvents
-      (some <| runWith brokenAuthorizeStep brokenAuthorizationStart
-        brokenAuthorizationEvents)]
+    makeCase "broken-unverified-authorization" "sensitivity" "model-only"
+      "broken-unverified-authorization" "broken-sensitivity"
+      brokenUnverifiedAuthorizationStart brokenAuthorizationEvents
+      (some <| runWith brokenUnverifiedAuthorizeStep
+        brokenUnverifiedAuthorizationStart
+        brokenAuthorizationEvents),
+    makeCase "broken-cancel-authorization" "sensitivity" "model-only"
+      "broken-cancel-authorization" "broken-sensitivity"
+      brokenCancelAuthorizationStart brokenAuthorizationEvents
+      (some <| runWith brokenCancelAuthorizeStep brokenCancelAuthorizationStart
+        brokenAuthorizationEvents),
+    makeCase "broken-remove-idempotency" "sensitivity" "model-only"
+      "broken-remove-idempotency" "broken-sensitivity" stalePartialInitial
+      [.remove, .remove]
+      (some <| runWith brokenRemoveStep stalePartialInitial [.remove, .remove])]
 
 private def renderJsonString (value : String) : String :=
   (Lean.Json.str value).compress

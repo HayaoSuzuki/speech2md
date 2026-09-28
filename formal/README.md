@@ -58,7 +58,7 @@ Leanで次の性質を検査しています。
 - remove成功後は確定モデルと部分ファイルが存在しない
 - removeを繰り返しても結果は変わらない
 
-壊れた公開許可遷移には、未検証かつキャンセル済みの部分ファイルを許可する固定witnessを置いています。正常遷移が安全条件を保ち、壊れた遷移が安全条件を破ることを同じ定理で検査します。
+検出感度は三つの壊れた遷移で確認します。未検証partialの許可は安全条件を破る固定witness、検証済みでもキャンセル済みのpartialを許可する遷移はキャンセル優先規則を破る固定witness、2回目のremoveでpartialを再生成する遷移は冪等性を破る固定witnessを持ちます。三つの前提を分離しているため、一つの違反が別の違反を代用することはありません。
 
 Leanは抽象状態の遷移を証明します。SHA-256の計算、ファイル削除、symlink、rename、OSのファイルロックはRustの統合テストで検査します。
 
@@ -89,7 +89,7 @@ Leanの証明はLeanモデルの性質を保証しますが、Rust実装、ネ�
 
 ### モデルライフサイクルfixture
 
-モデルライフサイクル用のgeneratorは、schema version 1の7 caseをJSONへ出力します。
+モデルライフサイクル用のgeneratorは、schema version 1の9 caseをJSONへ出力します。6件はRust実装との対応を調べ、3件の`model-only` caseは未検証許可、キャンセル優先、remove冪等性の検出感度を調べます。
 
 ```powershell
 lake exe model-lifecycle-testgen

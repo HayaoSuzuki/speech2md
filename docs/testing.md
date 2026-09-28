@@ -55,7 +55,7 @@ cargo test -p yasumaro-runtime --example model_lifecycle_oracle --features test-
 cargo run -p yasumaro-runtime --example model_lifecycle_oracle --features test-support -- --strict
 ```
 
-fixture freshnessの検査では、Leanが生成したschema version 1の期待状態とコミット済みJSONを比較します。strict oracleは`strict`と`internal-fixture`の6 caseを実行し、Rust側の観測結果をfixtureの期待状態・期待結果と比較します。壊れたLean遷移だけを扱う`model-only` caseはstrict実行から除外します。
+fixture freshnessの検査では、Leanが生成したschema version 1の期待状態とコミット済みJSONを比較します。strict oracleは`strict`と`internal-fixture`の6 caseを実行し、Rust側の観測結果をfixtureの期待状態・期待結果と比較します。未検証許可、キャンセル優先、remove冪等性の壊れた遷移を扱う3件の`model-only` caseはstrict実行から除外し、report modeで検出感度を確認します。
 
 1 caseを再現する場合は、case名を指定します。
 

@@ -42,7 +42,7 @@
 
 **Interfaces:**
 - Consumes: 設計書の`partialVerified`、`publishAuthorized`、`cancelRequested`と公開許可規則。
-- Produces: `State`の新field、`Event::{verifyPartial, requestCancel, authorizePublish, publish}`、`Safe`、`brokenAuthorizeStep : State → Event → State`、後続Taskが参照する定理。
+- Produces: `State`の新field、`Event::{verifyPartial, requestCancel, authorizePublish, publish}`、`Safe`、公開許可条件を一つずつ落とす二つの壊れた遷移、後続Taskが参照する定理。
 
 - [ ] **Step 1: 新しい定理名と実行例を先に追加する**
 
@@ -52,7 +52,9 @@
 #check unverified_partial_cannot_be_authorized
 #check cancel_before_authorization_blocks_publication
 #check cancel_after_authorization_preserves_authorization
-#check broken_authorization_violates_safety
+#check broken_unverified_authorization_violates_safety
+#check broken_cancel_authorization_is_detected
+#check broken_remove_violates_idempotency
 ```
 
 実行例は、検証なしの公開許可がno-op、許可前キャンセルが公開を阻止、許可後キャンセルが公開を阻止しないことを`assertEqual`で検査する。
@@ -92,10 +94,12 @@ cleanup成功はpartial、partialVerified、publishAuthorizedを消去する。c
 theorem unverified_partial_cannot_be_authorized ...
 theorem cancel_before_authorization_blocks_publication ...
 theorem cancel_after_authorization_preserves_authorization ...
-theorem broken_authorization_violates_safety ...
+theorem broken_unverified_authorization_violates_safety ...
+theorem broken_cancel_authorization_is_detected ...
+theorem broken_remove_violates_idempotency ...
 ```
 
-`brokenAuthorizeStep`は未検証またはキャンセル済みpartialにも`publishAuthorized := true`を設定する。固定状態を使い、正常遷移は安全条件を保ち、壊れた遷移だけが安全条件を破ることを証明する。
+`brokenUnverifiedAuthorizeStep`は未検証条件だけを、`brokenCancelAuthorizeStep`はキャンセル条件だけを落とす。前者は`Safe`違反、後者は正常遷移との公開許可結果の差を固定状態で証明する。`brokenRemoveStep`は2回目のremoveでartifactを再生成し、冪等性違反を固定traceで証明する。
 
 - [ ] **Step 5: GREENを確認する**
 
@@ -129,12 +133,12 @@ git commit -m "formal: model verified cancellable publication"
 - Modify: `docs/superpowers/reviews/2026-09-28-model-remove-clean-install-self-review.md`
 
 **Interfaces:**
-- Consumes: Task 1の`State`、`Event`、`run`、`brokenAuthorizeStep`。
+- Consumes: Task 1の`State`、`Event`、`run`、三つの専用broken遷移。
 - Produces: `modelLifecycleCases`、`modelLifecycleTestVectorsJson`、`model-lifecycle-testgen --output|--check`、schema version 1のfixture。
 
 - [ ] **Step 1: 生成caseの契約を先に追加する**
 
-`formal/YasumaroTests.lean`から未作成の`ModelLifecycleTestVectors`をimportし、case名、mode、正常期待状態、broken期待状態を検査する。caseは次の6件とsensitivity 1件に固定する。
+`formal/YasumaroTests.lean`から未作成の`ModelLifecycleTestVectors`をimportし、case名、mode、正常期待状態、broken期待状態を検査する。caseは次のproduction対応6件とsensitivity 3件に固定する。
 
 ```text
 verified-publish               strict / success
@@ -143,7 +147,9 @@ cancel-before-authorization    internal-fixture / cancelled
 cancel-after-authorization     internal-fixture / success
 busy-remove                    strict / model-in-use
 remove-success                 strict / success
-broken-authorization           model-only / broken-sensitivity
+broken-unverified-authorization model-only / broken-sensitivity
+broken-cancel-authorization     model-only / broken-sensitivity
+broken-remove-idempotency       model-only / broken-sensitivity
 ```
 
 - [ ] **Step 2: REDを確認する**
@@ -154,7 +160,7 @@ Expected: FAIL。`Yasumaro.ModelLifecycleTestVectors`が存在しないことを
 
 - [ ] **Step 3: case定義とJSON rendererを実装する**
 
-各caseは`name`、`kind`、`mode`、`scenario`、`start`、`events`、`expected`、`expectedResult`、`brokenExpected`を持つ。`expected`は`run start events`から計算し、broken sensitivityだけ`brokenAuthorizeStep`を使った結果も出力する。mode文字列は`strict`、`internal-fixture`、`model-only`に限定する。
+各caseは`name`、`kind`、`mode`、`scenario`、`start`、`events`、`expected`、`expectedResult`、`brokenExpected`を持つ。`expected`は`run start events`から計算し、三つのbroken sensitivity caseだけ各専用遷移を使った結果も出力する。mode文字列は`strict`、`internal-fixture`、`model-only`に限定する。
 
 - [ ] **Step 4: generatorとLake targetを実装する**
 
@@ -172,7 +178,7 @@ lake exe model-lifecycle-testgen -- --check <path>
 
 Run: `lake -d formal exe model-lifecycle-testgen -- --output ../crates/yasumaro-runtime/tests/fixtures/lean-model-lifecycle.json`
 
-Expected: PASS。schema version 1と7 caseを持つJSONを作る。
+Expected: PASS。schema version 1と9 caseを持つJSONを作る。
 
 - [ ] **Step 6: GREENとfreshnessを確認する**
 
@@ -441,3 +447,15 @@ Expected: PASS。
 git add .github/workflows/formal.yml README.md formal/README.md docs/testing.md docs/development.md docs/superpowers/reviews/2026-09-28-model-remove-clean-install-self-review.md
 git commit -m "docs: verify cancellable model lifecycle"
 ```
+
+## 実装後レビューによる感度検査の改訂
+
+実装後の形式監査で、従来の壊れた公開許可遷移が未検証とキャンセル済みを同じwitnessに含めており、キャンセル条件だけを落とした変異を単独で検査していないことが分かった。Task 1とTask 2のproduction対応6件は変更せず、`model-only`の感度検査を次の3件へ分割する。
+
+```text
+broken-unverified-authorization  model-only / broken-sensitivity
+broken-cancel-authorization      model-only / broken-sensitivity
+broken-remove-idempotency        model-only / broken-sensitivity
+```
+
+Task 2のcase一覧と生成件数は9 caseへ更新した。schema versionは1を維持し、正常期待状態は`run`、壊れた期待状態は各専用遷移から生成する。改訂のTDD記録、対応表、3巡レビューはセルフレビュー文書の「形式監査の検出感度追加」に残す。

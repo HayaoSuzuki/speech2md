@@ -105,10 +105,31 @@ def step (state : State) : Event → State
       else
         state
 
-def brokenAuthorizeStep (state : State) : Event → State
+def brokenUnverifiedAuthorizeStep (state : State) : Event → State
   | .authorizePublish =>
-      if state.writer = true ∧ state.«partial» = true then
+      if state.writer = true ∧ state.«partial» = true ∧
+          state.cancelRequested = false then
         { state with publishAuthorized := true }
+      else
+        state
+  | event => step state event
+
+def brokenCancelAuthorizeStep (state : State) : Event → State
+  | .authorizePublish =>
+      if state.writer = true ∧ state.«partial» = true ∧
+          state.partialVerified = true then
+        { state with publishAuthorized := true }
+      else
+        state
+  | event => step state event
+
+def brokenRemoveStep (state : State) : Event → State
+  | .remove =>
+      if state.writer = false ∧ state.readers = 0 then
+        if state.published = false ∧ state.«partial» = false then
+          { state with «partial» := true }
+        else
+          step state .remove
       else
         state
   | event => step state event

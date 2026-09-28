@@ -130,11 +130,11 @@ eventはinstall開始、partial作成、検証成功、キャンセル要求、�
 - remove成功後は`published = false`かつ`partial = false`である。
 - `writer = true`なら`readers = 0`である。
 
-Leanは抽象化した状態遷移を証明する。ファイル削除、rename、OSロックAPIの動作はRustテストで確認する。`publishAuthorized`を未検証またはキャンセル済みのpartialにも設定する壊れた遷移を別に定義し、安全条件を破る固定witnessを残す。網羅探索は行わない。
+Leanは抽象化した状態遷移を証明する。ファイル削除、rename、OSロックAPIの動作はRustテストで確認する。検出感度は、未検証partialを許可する遷移、検証済みでもキャンセル済みのpartialを許可する遷移、2回目のremoveでpartialを再生成する遷移の三つを固定witnessで確認する。未検証、キャンセル優先、remove冪等性を別々の前提で検査し、網羅探索は行わない。
 
 ## Lean生成fixtureとRust oracle
 
-Leanは正常公開、未検証partial、公開許可前のキャンセル、公開許可後のキャンセル、busy remove、remove成功をJSON fixtureとして生成する。各caseはイベント列、最終状態の期待値、`strict`、`internal-fixture`、`model-only`のいずれかのmodeを持つ。fixtureの期待値をRust側で書き直さず、CIはLeanの再生成結果とコミット済みfixtureが一致することを検査する。
+Leanは正常公開、未検証partial、公開許可前のキャンセル、公開許可後のキャンセル、busy remove、remove成功の6件と、三つの壊れた遷移をJSON fixtureとして生成する。各caseはイベント列、最終状態の期待値、`strict`、`internal-fixture`、`model-only`のいずれかのmodeを持つ。fixtureの期待値をRust側で書き直さず、CIはLeanの再生成結果とコミット済みfixtureが一致することを検査する。
 
 Rust adapterは`ModelInstaller::install_with_cancellation`と`ModelStore::remove`を呼び、確定モデル、partial、エラー分類を観測する。公開境界のcaseに限り、`test-support` featureで公開許可の直前と直後に停止できる同期点をinstallerへ渡す。この同期点は同じproduction関数内で動き、通常buildでは何もしない。adapterはcaseを個別に実行し、結果を`match`、`mismatch`、`infrastructure error`のいずれかに分類する。`strict`と`internal-fixture`の不一致はテストを失敗させ、`model-only`はLean内の検出能力だけを確認する。
 
@@ -184,5 +184,5 @@ Issue #5の元の再開要件を実装しない判断と、この設計への変
 - 強制終了で残った `.part` を次回installまたはremoveが削除する。
 - 未検証ファイルを確定モデルとして使用しない。
 - 実装にRange、sidecar、validator、backup、再開処理が含まれない。
-- Leanが未検証公開とキャンセル後の公開許可を拒否し、壊れた遷移の固定witnessが安全条件の検出能力を確認する。
+- Leanが未検証公開とキャンセル後の公開許可を拒否し、未検証許可、キャンセル優先、remove冪等性の固定witnessが検出感度を確認する。
 - Lean生成fixtureとRust oracleが、検証、キャンセル、公開、removeの対応をstrict modeで確認する。
