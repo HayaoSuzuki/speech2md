@@ -152,9 +152,9 @@ fn execute_transcribe(arguments: &TranscribeArgs) -> Result<String, AppError> {
     let engine_store = EngineStore::new(EngineRootResolver::resolve()?);
     let model_store = ModelStore::new(ModelRootResolver::resolve()?);
     let threads = std::thread::available_parallelism().map_or(1, usize::from);
-    let segmentation = model_store.require(ModelId::SpeakerSegmentation)?;
-    let embedding = model_store.require(ModelId::SpeakerEmbedding)?;
-    let diarizer = SherpaDiarizer::new(&segmentation, &embedding, threads)
+    let segmentation = model_store.acquire(ModelId::SpeakerSegmentation)?;
+    let embedding = model_store.acquire(ModelId::SpeakerEmbedding)?;
+    let diarizer = SherpaDiarizer::new(segmentation, embedding, threads)
         .map_err(|error| RuntimeError::Diarization(error.to_string()))?;
     let cancelled = Arc::new(AtomicBool::new(false));
     let trigger = Arc::clone(&cancelled);

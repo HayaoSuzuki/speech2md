@@ -15,6 +15,7 @@ use yasumaro_runtime::engine::{
     EngineError, Transcriber, TranscriptionRequest, WhisperProcessTranscriber,
 };
 use yasumaro_runtime::engine_artifact::{EngineSpec, EngineStore, Platform};
+use yasumaro_runtime::{ModelError, ModelId, ModelStore};
 
 const PROMPT_SENTINEL: &str = "機密-PROMPT-7e18b1";
 
@@ -34,10 +35,10 @@ struct Capture {
 struct Fixture {
     _root: TempDir,
     temp_root: PathBuf,
-    model: PathBuf,
     capture: PathBuf,
     spec: EngineSpec,
     store: EngineStore,
+    model_store: ModelStore,
 }
 
 impl Fixture {
@@ -81,7 +82,9 @@ impl Fixture {
         )
         .expect("write fake engine integrity receipt");
         let capture = root.path().join("capture.json");
-        let model = root.path().join("model.json");
+        let model_root = root.path().join("models");
+        fs::create_dir_all(&model_root).expect("create model root");
+        let model = model_root.join("ggml-base.bin");
         fs::write(
             &model,
             serde_json::to_vec(&Control {
@@ -94,10 +97,10 @@ impl Fixture {
         Self {
             _root: root,
             temp_root,
-            model,
             capture,
             spec,
             store: EngineStore::new(engine_root),
+            model_store: ModelStore::new(model_root),
         }
     }
 
@@ -108,7 +111,11 @@ impl Fixture {
             .expect("fake engine installed")
             .acquire()
             .expect("lease fake engine");
-        WhisperProcessTranscriber::new(lease, self.model.clone(), self.temp_root.clone())
+        let model = self
+            .model_store
+            .acquire(ModelId::WhisperBase)
+            .expect("lease fake model");
+        WhisperProcessTranscriber::new(lease, model, self.temp_root.clone())
             .expect("construct transcriber")
     }
 
@@ -119,9 +126,13 @@ impl Fixture {
             .expect("fake engine installed")
             .acquire()
             .expect("lease fake engine");
+        let model = self
+            .model_store
+            .acquire(ModelId::WhisperBase)
+            .expect("lease fake model");
         WhisperProcessTranscriber::new_for_test(
             lease,
-            self.model.clone(),
+            model,
             self.temp_root.clone(),
             available,
             grace,
@@ -150,6 +161,59 @@ impl Fixture {
                 .is_none()
         );
     }
+}
+
+#[test]
+fn whisper_transcriber_holds_the_model_lease_until_drop() {
+    let fixture = Fixture::new("success");
+    let engine = fixture
+        .store
+        .require(&fixture.spec)
+        .expect("fake engine installed")
+        .acquire()
+        .expect("lease fake engine");
+    let model = fixture
+        .model_store
+        .acquire(ModelId::WhisperBase)
+        .expect("lease fake model");
+    let transcriber = WhisperProcessTranscriber::new(engine, model, fixture.temp_root.clone())
+        .expect("construct transcriber");
+
+    assert_eq!(
+        fixture.model_store.remove(ModelId::WhisperBase),
+        Err(ModelError::ModelInUse {
+            id: ModelId::WhisperBase,
+        })
+    );
+    drop(transcriber);
+    fixture
+        .model_store
+        .remove(ModelId::WhisperBase)
+        .expect("remove model after transcriber drop");
+}
+
+#[test]
+fn whisper_constructor_failure_releases_the_model_lease() {
+    let fixture = Fixture::new("success");
+    let engine = fixture
+        .store
+        .require(&fixture.spec)
+        .expect("fake engine installed")
+        .acquire()
+        .expect("lease fake engine");
+    let model = fixture
+        .model_store
+        .acquire(ModelId::WhisperBase)
+        .expect("lease fake model");
+
+    assert!(matches!(
+        WhisperProcessTranscriber::new(engine, model, fixture.temp_root.join("missing")),
+        Err(EngineError::Configuration(_))
+    ));
+    fixture
+        .model_store
+        .remove(ModelId::WhisperBase)
+        .expect("remove model after constructor failure");
 }
 
 #[test]

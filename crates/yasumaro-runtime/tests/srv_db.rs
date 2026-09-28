@@ -91,12 +91,6 @@ fn evaluates_local_srv_db_without_copying_corpus_data() {
     let engine_store =
         EngineStore::new(EngineRootResolver::resolve().expect("resolve engine root"));
     let model_store = ModelStore::new(ModelRootResolver::resolve().expect("resolve model root"));
-    let segmentation = model_store
-        .require(ModelId::SpeakerSegmentation)
-        .expect("installed speaker segmentation model");
-    let embedding = model_store
-        .require(ModelId::SpeakerEmbedding)
-        .expect("installed speaker embedding model");
     let threads = std::thread::available_parallelism().map_or(1, usize::from);
     let temporary = tempfile::tempdir().expect("evaluation temporary directory");
 
@@ -110,8 +104,6 @@ fn evaluates_local_srv_db_without_copying_corpus_data() {
                 &engine_store,
                 &engine_spec,
                 &model_store,
-                &segmentation,
-                &embedding,
                 temporary.path(),
                 threads,
             )
@@ -134,8 +126,6 @@ fn measure_case(
     engine_store: &EngineStore,
     engine_spec: &yasumaro_runtime::engine_artifact::EngineSpec,
     model_store: &ModelStore,
-    segmentation: &Path,
-    embedding: &Path,
     temporary: &Path,
     threads: usize,
 ) -> MeasuredCase {
@@ -156,11 +146,17 @@ fn measure_case(
         .acquire()
         .expect("whisper engine lease");
     let whisper_model = model_store
-        .require(ModelId::WhisperBase)
+        .acquire(ModelId::WhisperBase)
         .expect("installed whisper base model");
     let transcriber =
         WhisperProcessTranscriber::new(lease, whisper_model, case_temp.path().to_path_buf())
             .expect("initialize whisper process adapter");
+    let segmentation = model_store
+        .acquire(ModelId::SpeakerSegmentation)
+        .expect("installed speaker segmentation model");
+    let embedding = model_store
+        .acquire(ModelId::SpeakerEmbedding)
+        .expect("installed speaker embedding model");
     let diarizer =
         SherpaDiarizer::new(segmentation, embedding, threads).expect("initialize speaker diarizer");
     let segments = transcriber

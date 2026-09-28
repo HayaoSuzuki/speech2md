@@ -10,6 +10,7 @@ use sherpa_onnx::{
 use yasumaro_core::{SpeakerId, SpeakerTurn, TimeSpan, Timestamp};
 
 use super::EngineError;
+use crate::ModelLease;
 
 /// Per-recording speaker-count request.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -59,10 +60,13 @@ pub trait Diarizer: Send + Sync {
 
 /// CPU-only sherpa-onnx speaker diarization adapter.
 pub struct SherpaDiarizer {
+    // Field order is significant: the native engine must be dropped before its model leases.
+    native: Mutex<OfflineSpeakerDiarization>,
+    _segmentation: ModelLease,
+    _embedding: ModelLease,
     segmentation_model: String,
     embedding_model: String,
     num_threads: i32,
-    native: Mutex<OfflineSpeakerDiarization>,
 }
 
 impl SherpaDiarizer {
@@ -72,12 +76,17 @@ impl SherpaDiarizer {
     ///
     /// Returns an error for invalid paths, thread counts, or native initialization failure.
     pub fn new(
-        segmentation_model: &Path,
-        embedding_model: &Path,
+        segmentation: ModelLease,
+        embedding: ModelLease,
         num_threads: usize,
     ) -> Result<Self, EngineError> {
         let automatic = DiarizationRequest { num_speakers: None };
-        let config = build_config(segmentation_model, embedding_model, num_threads, automatic)?;
+        let config = build_config(
+            segmentation.path(),
+            embedding.path(),
+            num_threads,
+            automatic,
+        )?;
         let native = OfflineSpeakerDiarization::create(&config)
             .ok_or_else(|| EngineError::Diarization("could not initialize sherpa-onnx".into()))?;
         if native.sample_rate() != 16_000 {
@@ -87,12 +96,14 @@ impl SherpaDiarizer {
             )));
         }
         Ok(Self {
-            segmentation_model: path_text(segmentation_model)?,
-            embedding_model: path_text(embedding_model)?,
+            native: Mutex::new(native),
+            segmentation_model: path_text(segmentation.path())?,
+            embedding_model: path_text(embedding.path())?,
+            _segmentation: segmentation,
+            _embedding: embedding,
             num_threads: i32::try_from(num_threads).map_err(|error| {
                 EngineError::InvalidConfig(format!("invalid thread count: {error}"))
             })?,
-            native: Mutex::new(native),
         })
     }
 }
@@ -251,10 +262,14 @@ fn seconds_to_millis(seconds: f32) -> Result<u64, EngineError> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::Path;
 
-    use super::{DiarizationRequest, NativeSegment, build_config, convert_segments};
+    use super::{
+        DiarizationRequest, NativeSegment, SherpaDiarizer, build_config, convert_segments,
+    };
     use crate::engine::EngineError;
+    use crate::{ModelId, ModelStore};
 
     #[test]
     fn rejects_zero_as_an_exact_speaker_count() {
@@ -296,6 +311,37 @@ mod tests {
             Some("segmentation.onnx")
         );
         assert_eq!(automatic.embedding.model.as_deref(), Some("embedding.onnx"));
+    }
+
+    #[test]
+    fn constructor_failure_releases_both_model_leases() {
+        let root = tempfile::tempdir().expect("temporary model root");
+        fs::write(root.path().join("segmentation-3-0.onnx"), b"segmentation")
+            .expect("write segmentation model");
+        fs::write(
+            root.path()
+                .join("3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"),
+            b"embedding",
+        )
+        .expect("write embedding model");
+        let store = ModelStore::new(root.path());
+        let segmentation = store
+            .acquire(ModelId::SpeakerSegmentation)
+            .expect("lease segmentation model");
+        let embedding = store
+            .acquire(ModelId::SpeakerEmbedding)
+            .expect("lease embedding model");
+
+        assert!(matches!(
+            SherpaDiarizer::new(segmentation, embedding, 0),
+            Err(EngineError::InvalidConfig(_))
+        ));
+        store
+            .remove(ModelId::SpeakerSegmentation)
+            .expect("remove segmentation after constructor failure");
+        store
+            .remove(ModelId::SpeakerEmbedding)
+            .expect("remove embedding after constructor failure");
     }
 
     #[test]

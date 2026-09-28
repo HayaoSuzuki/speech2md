@@ -167,3 +167,25 @@ production timeoutはconnect 30秒、blocking read 60秒である。testでは30
 指摘: 旧testは、manifestと一致しない既存finalをdownload失敗後も保持する契約だった。この契約では次のtranscribeが不正finalを使い得る。
 
 修正: 旧testを削除し、不正finalを通信前に削除してdownload失敗後も残さない契約へ置き換えた。検証済みfinalを保持する経路は、manifestと一致するbytesを使う別testで確認する。
+
+## Task 4: Transcribe中のモデルlease
+
+### 第1巡: 要件レビュー
+
+WhisperとSherpaのconstructorはraw pathではなく`ModelLease`を所有する。Whisperは選択されたモデル、Sherpaは話者区間モデルと話者埋め込みモデルを保持する。production、test-support、ignored評価testの全constructor呼び出しを`ModelStore::acquire`へ変更した。`model list`と`doctor`は従来どおりlocal snapshotの`require`を使い、暗黙downloadは追加していない。
+
+`whisper_transcriber_holds_the_model_lease_until_drop`は、transcriberが存在する間のremoveが`ModelInUse`となり、drop後のremoveが成功することを実際のfile lockで確認する。承認済み設計との差は見つからなかった。
+
+### 第2巡: 状態・安全性レビュー
+
+Whisperはchild processの起動から終了確認まで`self.model`を借用するため、その全期間を含むtranscriberの生存中はleaseが解放されない。Sherpaはnative engineを最初のfield、二つのleaseを後続fieldに置いた。Rustのfield破棄順により、native engineを破棄した後にleaseを解放する。
+
+指摘: constructorが引数を所有した後に失敗する経路ではRustのdropによりleaseが解放されるが、この条件を回帰testが固定していなかった。また、Sherpaのfield順序が安全条件であることがコードから読み取りにくかった。
+
+修正: Whisperは一時directory不正、Sherpaはthread数不正でconstructorを失敗させ、その直後に両モデルをremoveできるtestを追加した。Sherpaにはnative fieldをleaseより先に置く理由をコメントした。
+
+### 第3巡: 実装品質レビュー
+
+`rg`で`WhisperProcessTranscriber::new`、`new_for_test`、`SherpaDiarizer::new`の全呼び出しを列挙した。いずれも`acquire`で得たleaseを渡し、bare model pathを渡す箇所は残っていない。保持専用のSherpa fieldは`_segmentation`と`_embedding`とし、native configの再設定に必要なUTF-8 path文字列とは役割を分けた。
+
+`cargo check --workspace --all-targets --all-features --locked`はignored評価testを含めて成功した。公開constructorのerror説明、import、未使用field、完全pathのerror露出に新たな不整合は見つからなかった。

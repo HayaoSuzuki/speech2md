@@ -58,14 +58,14 @@ fn evaluates_voicepeak_diarization_without_transcription() {
         .expect("canonicalize VOICEPEAK directory");
     let model_store = ModelStore::new(ModelRootResolver::resolve().expect("resolve model root"));
     let segmentation = model_store
-        .require(ModelId::SpeakerSegmentation)
+        .acquire(ModelId::SpeakerSegmentation)
         .expect("installed speaker segmentation model");
     let embedding = model_store
-        .require(ModelId::SpeakerEmbedding)
+        .acquire(ModelId::SpeakerEmbedding)
         .expect("installed speaker embedding model");
     let threads = std::thread::available_parallelism().map_or(1, usize::from);
-    let diarizer = SherpaDiarizer::new(&segmentation, &embedding, threads)
-        .expect("initialize speaker diarizer");
+    let diarizer =
+        SherpaDiarizer::new(segmentation, embedding, threads).expect("initialize speaker diarizer");
     let temporary = tempfile::tempdir().expect("evaluation temporary directory");
 
     let cases = CASES

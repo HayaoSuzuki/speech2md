@@ -9,6 +9,7 @@ use thiserror::Error;
 use yasumaro_core::TranscribedSegment;
 
 use super::{parse_whisper_json, process, required_whisper_temp_bytes, write_whisper_wav};
+use crate::ModelLease;
 use crate::engine_artifact::EngineLease;
 
 const CANCELLATION_GRACE: Duration = Duration::from_secs(5);
@@ -122,7 +123,7 @@ impl SpaceProbe {
 /// Runs a managed, locked `whisper-cli` child process.
 pub struct WhisperProcessTranscriber {
     engine: EngineLease,
-    model_path: PathBuf,
+    model: ModelLease,
     temp_root: PathBuf,
     cancellation_grace: Duration,
     space_probe: SpaceProbe,
@@ -136,12 +137,12 @@ impl WhisperProcessTranscriber {
     /// Returns an error unless the model is a file and the temporary root is a directory.
     pub fn new(
         engine: EngineLease,
-        model_path: PathBuf,
+        model: ModelLease,
         temp_root: PathBuf,
     ) -> Result<Self, EngineError> {
         Self::build(
             engine,
-            model_path,
+            model,
             temp_root,
             CANCELLATION_GRACE,
             SpaceProbe::System,
@@ -156,14 +157,14 @@ impl WhisperProcessTranscriber {
     #[cfg(feature = "test-support")]
     pub fn new_for_test(
         engine: EngineLease,
-        model_path: PathBuf,
+        model: ModelLease,
         temp_root: PathBuf,
         available_temp_bytes: u64,
         cancellation_grace: Duration,
     ) -> Result<Self, EngineError> {
         Self::build(
             engine,
-            model_path,
+            model,
             temp_root,
             cancellation_grace,
             SpaceProbe::Fixed(available_temp_bytes),
@@ -172,12 +173,12 @@ impl WhisperProcessTranscriber {
 
     fn build(
         engine: EngineLease,
-        model_path: PathBuf,
+        model: ModelLease,
         temp_root: PathBuf,
         cancellation_grace: Duration,
         space_probe: SpaceProbe,
     ) -> Result<Self, EngineError> {
-        if !model_path.is_file() {
+        if !model.path().is_file() {
             return Err(EngineError::Configuration("model file is missing".into()));
         }
         if !temp_root.is_dir() {
@@ -187,7 +188,7 @@ impl WhisperProcessTranscriber {
         }
         Ok(Self {
             engine,
-            model_path,
+            model,
             temp_root,
             cancellation_grace,
             space_probe,
@@ -216,7 +217,7 @@ impl WhisperProcessTranscriber {
             .arg("--threads")
             .arg(request.threads.to_string())
             .arg("--model")
-            .arg(&self.model_path)
+            .arg(self.model.path())
             .arg("--file")
             .arg(&wav_path)
             .arg("--output-file")

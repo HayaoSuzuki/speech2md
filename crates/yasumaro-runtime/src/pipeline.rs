@@ -94,9 +94,7 @@ pub fn run_transcription(
 
     let installed = services.engine_store.require(services.engine_spec)?;
     let lease = installed.acquire()?;
-    let whisper_model = services.model_store.require(options.whisper_model)?;
-    services.model_store.require(ModelId::SpeakerSegmentation)?;
-    services.model_store.require(ModelId::SpeakerEmbedding)?;
+    let whisper_model = services.model_store.acquire(options.whisper_model)?;
     let transcriber =
         WhisperProcessTranscriber::new(lease, whisper_model, job.path().to_path_buf())
             .map_err(|error| map_transcription_error(&error))?;
