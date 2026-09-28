@@ -516,3 +516,21 @@ cargo test -p yasumaro-runtime --example model_lifecycle_oracle --features test-
 cargo run -p yasumaro-runtime --example model_lifecycle_oracle --features test-support --locked -- --strict
 cargo run -p yasumaro-runtime --example model_lifecycle_oracle --features test-support --locked -- --report
 ```
+
+## macOS CIのprogressing response修正
+
+### 第1巡: 要件レビュー
+
+macOSのx86_64とarm64で、`progressing_response_is_not_limited_by_the_read_timeout_total`だけが`request timed out`になった。productionのread timeout契約は、受信が継続する限り総所要時間だけでは失敗しないことである。テストは1バイトを40ミリ秒間隔で送る一方、read timeoutを80ミリ秒にしていた。
+
+指摘: test serverの`TcpStream::flush`は各1バイトを直ちにTCPへ送出することを保証せず、TCP_NODELAYも設定していなかった。このためNagle bufferingと遅延ACKの組合せにより、clientが観測する無進捗時間が80ミリ秒を超え得る。
+
+修正: 該当testのserver socketだけに`set_nodelay(true)`を設定した。production timeout値とdownload処理は変更していない。
+
+### 第2巡: 状態・安全性レビュー
+
+この変更はLean状態、公開許可、partial cleanup、removeの遷移を変更しない。test serverが意図した1バイトごとの進捗をtransportへ反映するだけである。正常系testの総応答時間は引き続きread timeoutを超えるため、timeoutが誤って総時間制限へ変われば同じtestが失敗する。
+
+### 第3巡: 実装品質レビュー
+
+TCP_NODELAYは全test共通helperではなく、細粒度の進捗を前提にする1件だけへ限定した。両macOS CIの同一failureをRED記録とし、ローカルでは修正前の同testを20回実行して20回成功したため、ローカル再現ではなくplatform依存のtransport条件として扱った。修正後は対象testの反復、model download test全体、workspace全体を再検証し、remote macOS CIを最終確認とする。

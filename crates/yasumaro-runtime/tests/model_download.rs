@@ -431,6 +431,9 @@ fn cancellation_stops_a_stalled_response_body_without_server_progress() {
 fn progressing_response_is_not_limited_by_the_read_timeout_total() {
     let bytes = b"abcde";
     let (url, server) = spawn_server(move |mut stream| {
+        stream
+            .set_nodelay(true)
+            .expect("send each progress byte without Nagle buffering");
         let _request = read_request(&mut stream);
         write!(
             stream,
