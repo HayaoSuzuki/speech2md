@@ -21,6 +21,8 @@ pub enum ModelError {
     InvalidModelRoot(String),
     #[error("model {id} download failed: {message}")]
     Download { id: ModelId, message: String },
+    #[error("HTTP client initialization failed")]
+    HttpClientInitialization,
     #[error("model {id} has size {actual}, expected {expected}")]
     SizeMismatch {
         id: ModelId,

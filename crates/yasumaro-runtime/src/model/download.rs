@@ -5,8 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use reqwest::blocking::Client;
+use reqwest::Client;
 use sha2::{Digest, Sha256};
+use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 
 use super::store::remove_entry;
 use super::{ModelError, ModelId, ModelManifest, ModelSpec, ModelStore};
@@ -14,12 +15,14 @@ use super::{ModelError, ModelId, ModelManifest, ModelSpec, ModelStore};
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
 const LOCK_RETRY_DELAY: Duration = Duration::from_millis(25);
+const CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const BUFFER_SIZE: usize = 64 * 1_024;
 
 pub struct ModelInstaller {
     manifest: ModelManifest,
     store: ModelStore,
     client: Client,
+    runtime: Runtime,
 }
 
 impl ModelInstaller {
@@ -27,7 +30,7 @@ impl ModelInstaller {
     ///
     /// # Errors
     ///
-    /// Returns an error if the HTTP client cannot be constructed.
+    /// Returns an error if the async runtime or HTTP client cannot be constructed.
     pub fn new(manifest: ModelManifest, store: ModelStore) -> Result<Self, ModelError> {
         Self::with_timeouts(manifest, store, CONNECT_TIMEOUT, READ_TIMEOUT)
     }
@@ -36,7 +39,7 @@ impl ModelInstaller {
     ///
     /// # Errors
     ///
-    /// Returns an error if the HTTP client cannot be constructed.
+    /// Returns an error if the async runtime or HTTP client cannot be constructed.
     #[cfg(feature = "test-support")]
     pub fn new_for_test(
         manifest: ModelManifest,
@@ -53,19 +56,22 @@ impl ModelInstaller {
         connect_timeout: Duration,
         read_timeout: Duration,
     ) -> Result<Self, ModelError> {
+        let runtime = RuntimeBuilder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .map_err(|_| ModelError::HttpClientInitialization)?;
         let client = Client::builder()
             .connect_timeout(connect_timeout)
-            .timeout(read_timeout)
+            .read_timeout(read_timeout)
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .map_err(|_| ModelError::Download {
-                id: ModelId::WhisperBase,
-                message: "HTTP client initialization failed".into(),
-            })?;
+            .map_err(|_| ModelError::HttpClientInitialization)?;
         Ok(Self {
             manifest,
             store,
             client,
+            runtime,
         })
     }
 
@@ -184,90 +190,111 @@ impl ModelInstaller {
         path: &Path,
         cancelled: &AtomicBool,
     ) -> Result<(), ModelError> {
-        let mut response = self
-            .client
-            .get(spec.url.clone())
-            .send()
-            .map_err(|error| download_error(spec.id, &error))?;
-        if !response.status().is_success() {
-            return Err(ModelError::Download {
-                id: spec.id,
-                message: format!("HTTP status {}", response.status()),
-            });
-        }
-        if cancelled.load(Ordering::Acquire) {
+        self.runtime.block_on(download_and_verify_async(
+            &self.client,
+            spec,
+            path,
+            cancelled,
+        ))
+    }
+}
+
+async fn download_and_verify_async(
+    client: &Client,
+    spec: &ModelSpec,
+    path: &Path,
+    cancelled: &AtomicBool,
+) -> Result<(), ModelError> {
+    check_cancelled(spec.id, cancelled)?;
+    let request = client.get(spec.url.clone()).send();
+    let mut response = tokio::select! {
+        result = request => result.map_err(|error| download_error(spec.id, &error))?,
+        () = wait_for_cancellation(cancelled) => {
             return Err(ModelError::Cancelled { id: spec.id });
         }
-        let mut output = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)
-            .map_err(|error| storage_error("create partial model", &error))?;
-        let mut hasher = Sha256::new();
-        let mut actual_size = 0_u64;
-        let mut buffer = vec![0_u8; BUFFER_SIZE].into_boxed_slice();
-        loop {
-            if cancelled.load(Ordering::Acquire) {
+    };
+    check_cancelled(spec.id, cancelled)?;
+    if !response.status().is_success() {
+        return Err(ModelError::Download {
+            id: spec.id,
+            message: format!("HTTP status {}", response.status()),
+        });
+    }
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| storage_error("create partial model", &error))?;
+    let mut hasher = Sha256::new();
+    let mut actual_size = 0_u64;
+    loop {
+        check_cancelled(spec.id, cancelled)?;
+        let chunk = tokio::select! {
+            result = response.chunk() => {
+                result.map_err(|error| download_error(spec.id, &error))?
+            }
+            () = wait_for_cancellation(cancelled) => {
                 return Err(ModelError::Cancelled { id: spec.id });
             }
-            let count = match response.read(&mut buffer) {
-                Ok(count) => count,
-                Err(_error) if cancelled.load(Ordering::Acquire) => {
-                    return Err(ModelError::Cancelled { id: spec.id });
-                }
-                Err(error) => {
-                    return Err(ModelError::Download {
-                        id: spec.id,
-                        message: format!("read response body: {}", error.kind()),
-                    });
-                }
-            };
-            if cancelled.load(Ordering::Acquire) {
-                return Err(ModelError::Cancelled { id: spec.id });
-            }
-            if count == 0 {
-                break;
-            }
-            actual_size = actual_size
-                .checked_add(u64::try_from(count).map_err(|_| {
-                    ModelError::Storage("count downloaded bytes: numeric overflow".into())
-                })?)
-                .ok_or_else(|| ModelError::Storage("count downloaded bytes: overflow".into()))?;
-            if actual_size > spec.size {
-                return Err(ModelError::SizeMismatch {
-                    id: spec.id,
-                    expected: spec.size,
-                    actual: actual_size,
-                });
-            }
-            output
-                .write_all(&buffer[..count])
-                .map_err(|error| storage_error("write partial model", &error))?;
-            hasher.update(&buffer[..count]);
-        }
-        output
-            .sync_all()
-            .map_err(|error| storage_error("sync partial model", &error))?;
-        let file_size = output
-            .metadata()
-            .map_err(|error| storage_error("inspect partial model", &error))?
-            .len();
-        if file_size != spec.size {
+        };
+        check_cancelled(spec.id, cancelled)?;
+        let Some(chunk) = chunk else {
+            break;
+        };
+        let count = chunk.len();
+        actual_size = actual_size
+            .checked_add(u64::try_from(count).map_err(|_| {
+                ModelError::Storage("count downloaded bytes: numeric overflow".into())
+            })?)
+            .ok_or_else(|| ModelError::Storage("count downloaded bytes: overflow".into()))?;
+        if actual_size > spec.size {
             return Err(ModelError::SizeMismatch {
                 id: spec.id,
                 expected: spec.size,
-                actual: file_size,
+                actual: actual_size,
             });
         }
-        let actual_hash = format!("{:x}", hasher.finalize());
-        if actual_hash != spec.sha256 {
-            return Err(ModelError::HashMismatch {
-                id: spec.id,
-                expected: spec.sha256.clone(),
-                actual: actual_hash,
-            });
+        output
+            .write_all(&chunk)
+            .map_err(|error| storage_error("write partial model", &error))?;
+        check_cancelled(spec.id, cancelled)?;
+        hasher.update(&chunk);
+    }
+    check_cancelled(spec.id, cancelled)?;
+    output
+        .sync_all()
+        .map_err(|error| storage_error("sync partial model", &error))?;
+    check_cancelled(spec.id, cancelled)?;
+    let file_size = output
+        .metadata()
+        .map_err(|error| storage_error("inspect partial model", &error))?
+        .len();
+    check_cancelled(spec.id, cancelled)?;
+    if file_size != spec.size {
+        return Err(ModelError::SizeMismatch {
+            id: spec.id,
+            expected: spec.size,
+            actual: file_size,
+        });
+    }
+    let actual_hash = format!("{:x}", hasher.finalize());
+    if actual_hash != spec.sha256 {
+        return Err(ModelError::HashMismatch {
+            id: spec.id,
+            expected: spec.sha256.clone(),
+            actual: actual_hash,
+        });
+    }
+    check_cancelled(spec.id, cancelled)?;
+    Ok(())
+}
+
+async fn wait_for_cancellation(cancelled: &AtomicBool) {
+    loop {
+        if cancelled.load(Ordering::Acquire) {
+            return;
         }
-        Ok(())
+        tokio::time::sleep(CANCELLATION_POLL_INTERVAL).await;
     }
 }
 

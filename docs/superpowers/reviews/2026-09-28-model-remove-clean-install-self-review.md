@@ -347,3 +347,29 @@ generatorは標準出力、`--output`、`--check`を持ち、`--check`の一致�
 指摘: 最初の`--output`失敗は`IO.FS.writeFile`の未処理例外により完全pathを表示した。
 
 修正: 書込も専用関数で捕捉し、固定文言とexit 1へ正規化した。存在しない親directoryを指定する実行testで、path非露出と終了コードを確認した。生成fixtureのfreshness checkはfileを書き換えずに成功した。
+
+## 接続待ちとbody待ちのキャンセル
+
+### 第1巡: 要件レビュー
+
+`ModelInstaller::{install, install_with_cancellation}`は同期公開APIのまま維持し、モデル取得だけを非同期reqwest clientとcurrent-thread Tokio runtimeへ移した。productionのconnect timeoutは30秒、read timeoutは60秒、キャンセル監視は25ミリ秒間隔である。requestは従来どおり無条件GETを一度だけ送り、redirect、Range、validator、sidecar、backup、再試行を追加していない。
+
+指摘: reqwestの`blocking` featureを計画どおりcrateから外すと、対象外の`engine_artifact::install`がcompileできなかった。
+
+修正: `model::download`はasync `reqwest::Client`だけをimportして使い、crate-wide featureは既存engine installのため保持した。engine実装を今回の範囲へ巻き込まない判断を実行台帳へ記録した。
+
+### 第2巡: 状態・安全性レビュー
+
+response header待機と各body chunk待機は、HTTP futureとキャンセル監視futureを`tokio::select!`で競合させる。headerまたはchunkが先に完了した場合も、直後にflagを再確認する。chunk受信、file write、EOF、`sync_all`、metadata、size/hash検証の境界でも確認し、検出したerrorは従来の共通cleanupを通ってpartialを削除する。排他lockはsend、body取得、書込、検証、cleanupの全期間で保持する。
+
+指摘: 最初のbody停止testはserverが先頭chunkを書いた時点でflagを設定しており、clientがchunkを処理する前なら旧blocking実装でも次のreadに入らず成功した。
+
+修正: partial fileへ先頭chunkが書き込まれたことを固定上限付きで観測してからflagを設定するようにした。これにより旧実装ではheader・bodyの両testが250ミリ秒以内に完了せずRED、非同期化後はserverを再開させる前に`Cancelled`となりGREENになった。
+
+### 第3巡: 実装品質レビュー
+
+current-thread runtimeはtime driverに加えてI/O driverを明示的に有効化し、Tokio dependencyは`macros`、`net`、`rt`、`time`だけを指定した。`read_timeout`は各readの無進捗時間へ適用し、40ミリ秒ごとに進む総時間200ミリ秒のresponseが80ミリ秒のread timeoutでも成功するtestを通した。stalled serverはchannelと2秒上限で必ず解放され、header testは解放後にsocketへ書かず接続を閉じるため、client側cancel後のbroken pipeに依存しない。
+
+指摘: 初回runtimeはtime driverだけを有効にしていたため、async reqwestがsocketを作る時点でpanicした。またheader完了とcancelが同時の場合、HTTP statusをflagより先に分類していた。
+
+修正: `enable_io()`とTokio `net` featureを追加し、send完了直後はstatus分類前に`check_cancelled`を呼ぶようにした。runtime/client構築errorは内部error、model ID、URLを持たない`HttpClientInitialization`へ正規化した。runtime全target・全featureの厳格Clippyと全testは成功した。

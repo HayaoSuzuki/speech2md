@@ -32,6 +32,7 @@ yasumaro-formats = { path = "../yasumaro-formats" }
 symphonia = { version = "0.6.1", default-features = false, features = ["aac", "isomp4", "mp3", "pcm", "wav"] }
 tempfile = "3"
 thiserror.workspace = true
+tokio = { version = "1", features = ["macros", "net", "rt", "time"] }
 tar = "0.4"
 url = { version = "=2.5.0", features = ["serde"] }
 wait-timeout = "0.2"

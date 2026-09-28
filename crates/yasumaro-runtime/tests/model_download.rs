@@ -313,6 +313,155 @@ fn read_timeout_cleans_partial() {
 }
 
 #[test]
+fn cancellation_stops_waiting_for_response_headers() {
+    let bytes = b"model bytes";
+    let (request_tx, request_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let (url, server) = spawn_server(move |mut stream| {
+        let _request = read_request(&mut stream);
+        request_tx.send(()).expect("signal received request");
+        release_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("release stalled response");
+    });
+    let root = TempDir::new().expect("temporary model root");
+    let installer = installer(&root, &url, bytes, sha256(bytes), Duration::from_secs(1));
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let worker_flag = Arc::clone(&cancelled);
+    let (result_tx, result_rx) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        result_tx
+            .send(installer.install_with_cancellation(&[MODEL], &worker_flag))
+            .expect("send install result");
+    });
+
+    request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("request reaches server");
+    cancelled.store(true, Ordering::Release);
+    let prompt = result_rx.recv_timeout(Duration::from_millis(250));
+    release_tx.send(()).expect("release response headers");
+    let completed_while_stalled = prompt.is_ok();
+    let result = prompt.unwrap_or_else(|_| {
+        result_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("installer eventually exits")
+    });
+    worker.join().expect("installer worker exits");
+    server.join().expect("server exits");
+
+    assert!(
+        completed_while_stalled,
+        "cancellation must not wait for response headers"
+    );
+    assert_eq!(result, Err(ModelError::Cancelled { id: MODEL }));
+    assert_no_partial(&root);
+}
+
+#[test]
+fn cancellation_stops_a_stalled_response_body_without_server_progress() {
+    let bytes = b"first-second";
+    let (first_sent_tx, first_sent_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let (url, server) = spawn_server(move |mut stream| {
+        let _request = read_request(&mut stream);
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            bytes.len()
+        )
+        .expect("write headers");
+        stream.write_all(b"first-").expect("write first chunk");
+        stream.flush().expect("flush first chunk");
+        first_sent_tx.send(()).expect("signal first chunk");
+        release_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("release stalled body");
+    });
+    let root = TempDir::new().expect("temporary model root");
+    let installer = installer(&root, &url, bytes, sha256(bytes), Duration::from_secs(1));
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let worker_flag = Arc::clone(&cancelled);
+    let (result_tx, result_rx) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        result_tx
+            .send(installer.install_with_cancellation(&[MODEL], &worker_flag))
+            .expect("send install result");
+    });
+
+    first_sent_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive first chunk signal");
+    let partial_path = root.path().join(PARTIAL_NAME);
+    let write_deadline = Instant::now() + Duration::from_secs(2);
+    while std::fs::metadata(&partial_path).map_or(true, |metadata| metadata.len() == 0) {
+        assert!(
+            Instant::now() < write_deadline,
+            "installer writes the first chunk before cancellation"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    cancelled.store(true, Ordering::Release);
+    let prompt = result_rx.recv_timeout(Duration::from_millis(250));
+    release_tx.send(()).expect("release stalled body");
+    let completed_while_stalled = prompt.is_ok();
+    let result = prompt.unwrap_or_else(|_| {
+        result_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("installer eventually exits")
+    });
+    worker.join().expect("installer worker exits");
+    server.join().expect("server exits");
+
+    assert!(
+        completed_while_stalled,
+        "cancellation must not wait for additional response bytes"
+    );
+    assert_eq!(result, Err(ModelError::Cancelled { id: MODEL }));
+    assert_no_partial(&root);
+}
+
+#[test]
+fn progressing_response_is_not_limited_by_the_read_timeout_total() {
+    let bytes = b"abcde";
+    let (url, server) = spawn_server(move |mut stream| {
+        let _request = read_request(&mut stream);
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            bytes.len()
+        )
+        .expect("write headers");
+        for byte in bytes {
+            stream
+                .write_all(std::slice::from_ref(byte))
+                .expect("write chunk");
+            stream.flush().expect("flush chunk");
+            thread::sleep(Duration::from_millis(40));
+        }
+    });
+    let root = TempDir::new().expect("temporary model root");
+    let installer = installer(&root, &url, bytes, sha256(bytes), Duration::from_millis(80));
+
+    installer
+        .install(&[MODEL])
+        .expect("progressing response succeeds");
+    server.join().expect("server exits");
+    assert_no_partial(&root);
+}
+
+#[test]
+fn http_client_initialization_error_has_no_model_id_or_internal_message() {
+    let error = ModelError::HttpClientInitialization;
+    let display = error.to_string();
+
+    assert_eq!(display, "HTTP client initialization failed");
+    assert!(!display.contains("whisper-base"));
+    assert!(!display.contains("http://"));
+    assert!(!display.contains("builder"));
+}
+
+#[test]
 fn midstream_cancellation_cleans_partial() {
     let bytes = b"first-second";
     let (first_sent_tx, first_sent_rx) = mpsc::channel();
