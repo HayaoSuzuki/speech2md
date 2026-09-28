@@ -49,3 +49,41 @@ Leanの定理は抽象状態の不変条件に限定し、OSのrename、unlink�
 修正: 有効finalは再取得せず、不正finalは通信前に削除する設計とした。公開時には確定パスが存在しないため、backupを使わない。
 
 placeholder、TBD、未定の選択肢、設計内部の矛盾は残っていない。設計対象はモデル削除、失敗時cleanup、必要なロック、限定したLean証明に収まっている。
+
+## 実装計画書
+
+対象は `docs/superpowers/plans/2026-09-28-model-remove-clean-install.md` である。
+
+### 第1巡: 要件レビュー
+
+設計書の完了条件を6個のTaskへ対応づけた。モデル削除と非待機の使用中判定はTask 2と5、失敗時cleanupと再開機構の不在はTask 3、transcribe中のleaseはTask 4、Lean証明はTask 1、利用者文書とCIはTask 6が扱う。各Taskは失敗テスト、実装、成功確認、3巡のレビュー、コミットの順に進む。
+
+指摘: URLと完全なローカルpathを表示しない制約はGlobal Constraintsにあったが、検出するテストがTask 3になかった。
+
+修正: `errors_and_logs_do_not_expose_url_or_full_path`をTask 3へ追加し、reqwest errorは通信段階の分類、filesystem errorは操作種別と`ErrorKind`へ正規化する手順を明記した。
+
+### 第2巡: 状態・型レビュー
+
+install、remove、leaseの状態変化をTask間で追跡した。Task 2がlockとleaseを定義し、Task 3が同じ排他lockの内側でcleanup、検証、公開を実行する。Task 4はtranscriberとdiarizerにleaseを所有させ、Task 5はCLIへremoveとcancellationを接続する。この順序では、後続Taskが未定義の型やAPIへ依存しない。
+
+指摘1: `publishVerified`というLean eventは、SHA-256計算までLeanで証明するように読めた。
+
+修正1: このeventはRust側で行う全体検証とrenameをまとめた抽象遷移であり、ハッシュ計算とOS操作はRustテストの範囲だと明記した。
+
+指摘2: Task 2から6の一部に変更対象の略記があり、Task 4のconstructorには引数名と戻り値がなかった。
+
+修正2: 変更対象をすべてリポジトリ相対pathで列挙し、`ModelLease::path`とWhisper、Sherpaのconstructorを完全なsignatureで記載した。
+
+### 第3巡: 実行可能性と文書量のレビュー
+
+6個のTaskにRED、GREEN、3巡レビュー、コミットの各段階がある。3種類のレビュー手順は各Taskに1個ずつ、合計18個ある。Review Focusの5項目には、それぞれTask 2または3のテストが対応する。
+
+指摘1: 初稿は650行あり、同じ制約と確認項目を複数の節で繰り返していた。
+
+修正1: 共通事項をGlobal ConstraintsとReview Focusへ集約し、計画を477行へ縮めた。各Taskには対象file、interface、test名、command、commit境界を残した。
+
+指摘2: formal workflowに指定していたLean Action `v1.6.0`は、公式READMEで推奨されている指定と一致しなかった。
+
+修正2: `leanprover/lean-action@v1`を使い、`formal`をLake package directoryとしてbuildだけを実行した後、`lake exe YasumaroTests`を明示的に実行する構成へ変更した。
+
+計画書にはplaceholder、TBD、未決定の分岐がない。実装時に新しい要件が見つかった場合は計画へ無断で追加せず、承認済み設計との差として記録する。
