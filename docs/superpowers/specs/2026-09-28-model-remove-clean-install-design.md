@@ -11,9 +11,10 @@ Issue #5 は、モデル取得の中断後に HTTP Range で取得を再開す�
 - `yasumaro model remove <model>...` で指定モデルを削除できる。
 - install は取得が必要な場合にoffset 0から開始し、再開用の永続状態を作らない。
 - 通信、キャンセル、検証、公開の通常の失敗では `.part` を削除する。
+- 接続待ちと応答待ちの間もCtrl+Cを監視し、キャンセルを短時間で終了コード130へ変換する。
 - サイズと SHA-256 を検証したモデルだけを文字起こし処理へ渡す。
 - install、remove、transcribe の競合をモデル単位のロックで調停する。
-- 状態遷移の安全性を小さい Lean モデルで証明する。
+- 検証、キャンセル、公開の順序をLeanで証明し、Leanが生成した期待値をRust実装と照合する。
 
 ## 対象外
 
@@ -22,7 +23,7 @@ Issue #5 は、モデル取得の中断後に HTTP Range で取得を再開す�
 - 同じ install 内での自動再接続
 - sidecar、公開用backup、backup復旧
 - SIGKILLや電源断の瞬間に `.part` の削除を完了させる保証
-- 有限状態の網羅探索、生成corpus、Rust oracle、監査報告生成
+- 深さを増やす有限状態の網羅探索と監査報告生成
 - `engine install` の変更
 - `transcribe` による暗黙のモデル取得
 
@@ -56,17 +57,22 @@ Whisperの子プロセスを起動して終了を待つ間、Whisperモデルの
 2. 前回の強制終了で残った `.part` を削除する。削除できなければ通信を始めない。
 3. 確定パスがマニフェストのサイズとSHA-256に一致する通常ファイルなら、通信せず成功する。
 4. 確定パスに不正なファイル、symlink、空directoryがあれば安全に削除する。非空directoryはエラーにする。
-5. URLへ無条件GETを一度送る。Range headerは送らない。
-6. 決定的な `.part` パスを新規作成し、応答本文を書き込む。既存entryを削除した後に新規作成するため、symlinkを追跡しない。
-7. 期待サイズを超えた時点で停止する。本文終了後に `.part` を同期し、実ファイル長と全体のSHA-256を検証する。
-8. 検証済み `.part` を確定名へrenameする。確定名は手順4で存在しないため、Windowsでも置換用backupを必要としない。
-9. 成功ログを出し、排他ロックを解放する。
+5. URLへ無条件GETを一度送る。Range headerは送らない。HTTP処理には非同期clientを使うが、`ModelInstaller`の公開APIは同期のままにする。
+6. 接続と各body readを、25ミリ秒間隔のキャンセル監視と競合させる。接続は30秒、データを受信しないreadは60秒で失敗させる。
+7. 決定的な `.part` パスを新規作成し、応答本文を書き込む。既存entryを削除した後に新規作成するため、symlinkを追跡しない。
+8. 期待サイズを超えた時点で停止する。本文終了後に `.part` を同期し、実ファイル長と全体のSHA-256を検証する。
+9. キャンセルフラグを最後に確認し、falseなら公開を許可する。検証済み `.part` を確定名へrenameする。確定名は手順4で存在しないため、Windowsでも置換用backupを必要としない。
+10. 成功ログを出し、排他ロックを解放する。
 
 接続、HTTP status、read、write、同期、サイズ、SHA-256、rename、キャンセルのいずれかで失敗した場合は、`.part` の削除を試みる。削除に成功すれば元のエラーを返す。削除にも失敗した場合は、元のエラーとcleanup errorの両方を持つ`CleanupFailed`を返す。
 
 ## キャンセルと強制終了
 
-CLIはinstall開始前にCtrl+C handlerを登録し、installerへcancellation flagを渡す。installerは応答本文を読む前後でflagを確認する。キャンセルを検出したら `.part` を削除し、`Cancelled`を返す。CLIは終了コード130と再実行手順を表示する。
+CLIはinstall開始前にCtrl+C handlerを登録し、installerへcancellation flagを渡す。installerはロック待機、接続待ち、各body read、書き込み、同期、検証、公開許可の前後でflagを確認する。接続とbody readでは非同期処理と25ミリ秒間隔の監視を競合させる。キャンセルを検出したら `.part` を削除し、`Cancelled`を返す。CLIは終了コード130と再実行手順を表示する。
+
+公開許可は、rename直前に行うキャンセルフラグの最終確認で確定する。最終確認でtrueを読んだ場合はcleanupへ進む。falseを読んだ後のキャンセルは現在のモデルの公開を止めず、renameが成功すればinstall成功として扱う。この規則により、同時に起きたキャンセルと公開の結果を一意に決める。
+
+通常ファイルへのwriteと`sync_all`は処理中に安全に中断できない。installerは各呼び出しの直後にキャンセルを確認するため、キャンセル完了は実行中のファイルシステム呼び出しが戻るまで遅れることがある。ネットワーク待機にはこの制約を適用しない。
 
 SIGKILLや電源断ではプロセスがcleanupを実行できない。この場合だけ `.part` が残り得る。次回のinstallは通信前に削除し、removeも削除対象に含める。残存 `.part` を再開には使わない。
 
@@ -83,6 +89,7 @@ SIGKILLや電源断ではプロセスがcleanupを実行できない。この場
 `ModelError`へ次を追加する。
 
 - `Cancelled { id }`: 利用者がinstallを中断した。
+- `HttpClientInitialization`: モデルを選ぶ前にHTTP clientまたは非同期runtimeの初期化に失敗した。内部エラーの文字列は利用者へ表示しない。
 - `ModelInUse { id }`: removeが非待機の排他ロックを取得できなかった。
 - `Lock { id, message }`: lock directory、lock file、またはロックAPIで競合以外の失敗が起きた。
 - `CleanupFailed { id, source: Box<ModelError>, cleanup }`: installの元の失敗に `.part` 削除失敗が重なった。`source`に元の分類を保持し、`cleanup`に削除失敗を保持する。
@@ -97,24 +104,37 @@ Leanの状態は次の値だけを持つ。
 published          確定名のモデルが存在する
 publishedVerified  確定モデルが全体検証済みである
 partial            .partが存在する
+partialVerified    .partのサイズとSHA-256が検証済みである
+publishAuthorized  最後のキャンセル確認を通過し、公開を許可した
+cancelRequested    現在のinstallにキャンセル要求が届いた
 readers            共有lease数
 writer             installまたはremoveが排他ロックを持つ
 ```
 
-eventはinstall開始、partial作成、検証成功、公開、通常失敗とcleanup成功、cleanup失敗、lease取得・解放、remove試行に限定する。remove試行はロックを取得できる場合だけ状態を消去し、使用中なら状態を変えない。
+eventはinstall開始、partial作成、検証成功、キャンセル要求、公開許可、公開、通常失敗とcleanup成功、cleanup失敗、lease取得・解放、remove試行に限定する。install開始は`cancelRequested = false`の場合だけwriterを取得する。検証成功は`partialVerified`を設定する。公開許可は`partialVerified = true`かつ`cancelRequested = false`の場合だけ`publishAuthorized`を設定し、公開は許可済みの場合だけ確定モデルを作る。remove試行はロックを取得できる場合だけ状態を消去し、使用中なら状態を変えない。
 
-`published`は、この状態機械が検証後に公開した確定モデルを表す。外部から置かれた不正なfinal entryは`published`として扱わず、Rust実装が通信前に検査して削除する。初期状態は`published → publishedVerified`と`writer → readers = 0`を満たすものとし、partialの有無は制限しない。これにより、強制終了で残ったpartialと検証済みfinalが併存する状態も対象にする。インストール後に別プロセスがモデル内容を書き換える操作は状態機械の対象外とする。
+`published`は、この状態機械が検証後に公開した確定モデルを表す。外部から置かれた不正なfinal entryは`published`として扱わず、Rust実装が通信前に検査して削除する。安全条件は`published → publishedVerified`、`partialVerified → partial`、`publishAuthorized → partialVerified ∧ writer`、`writer → readers = 0`とする。プロセス開始時の初期状態は、partialの有無を制限せず、`partialVerified`、`publishAuthorized`、`cancelRequested`をfalseにする。これにより、強制終了で残った未検証partialと検証済みfinalが併存する状態も対象にする。インストール後に別プロセスがモデル内容を書き換える操作は状態機械の対象外とする。
 
 次の定理を証明する。
 
 - 到達可能な状態で`published → publishedVerified`が成り立つ。
+- `partialVerified → partial`と`publishAuthorized → partialVerified ∧ writer`が成り立つ。
+- 未検証partialは公開を許可されない。
+- 公開許可前のキャンセル要求は公開を阻止する。
+- 公開許可後のキャンセル要求は許可を取り消さない。
 - 通常失敗でcleanupに成功した後は`partial = false`である。
 - cleanup失敗は`published`と`publishedVerified`を変更せず、未検証モデルを公開しない。
 - 使用中のremove試行は状態を変えない。
 - remove成功後は`published = false`かつ`partial = false`である。
 - `writer = true`なら`readers = 0`である。
 
-Leanは抽象化した状態遷移を証明する。ファイル削除、rename、OSロックAPIの動作はRustテストで確認する。有限探索、壊れた遷移のwitness、テストfixture生成は設けない。
+Leanは抽象化した状態遷移を証明する。ファイル削除、rename、OSロックAPIの動作はRustテストで確認する。`publishAuthorized`を未検証またはキャンセル済みのpartialにも設定する壊れた遷移を別に定義し、安全条件を破る固定witnessを残す。網羅探索は行わない。
+
+## Lean生成fixtureとRust oracle
+
+Leanは正常公開、未検証partial、公開許可前のキャンセル、公開許可後のキャンセル、busy remove、remove成功をJSON fixtureとして生成する。各caseはイベント列、最終状態の期待値、`strict`、`internal-fixture`、`model-only`のいずれかのmodeを持つ。fixtureの期待値をRust側で書き直さず、CIはLeanの再生成結果とコミット済みfixtureが一致することを検査する。
+
+Rust adapterは`ModelInstaller::install_with_cancellation`と`ModelStore::remove`を呼び、確定モデル、partial、エラー分類を観測する。公開境界のcaseに限り、`test-support` featureで公開許可の直前と直後に停止できる同期点をinstallerへ渡す。この同期点は同じproduction関数内で動き、通常buildでは何もしない。adapterはcaseを個別に実行し、結果を`match`、`mismatch`、`infrastructure error`のいずれかに分類する。`strict`と`internal-fixture`の不一致はテストを失敗させ、`model-only`はLean内の検出能力だけを確認する。
 
 ## Rustテスト
 
@@ -122,6 +142,8 @@ Leanは抽象化した状態遷移を証明する。ファイル削除、rename�
 
 - fresh downloadはRange headerを送らず、sidecarを作らない。
 - 通信切断、read timeout、Ctrl+C、過大応答、サイズ不一致、SHA-256不一致、rename失敗後に `.part` が残らない。
+- 接続応答待ちとbody停止中のCtrl+Cが250ミリ秒以内に`Cancelled`を返し、`.part`を残さない。
+- 全体検証後かつ公開許可前のCtrl+Cは確定モデルを作らず、公開許可後のCtrl+Cはrename成功時にinstall成功となる。
 - cleanup自体の失敗では元の失敗とcleanup失敗を報告し、確定モデルを作らない。
 - 強制終了相当の古い `.part` を次回installが通信前に削除する。
 - 検証済みモデルだけを確定名へ配置する。
@@ -133,13 +155,13 @@ Leanは抽象化した状態遷移を証明する。ファイル削除、rename�
 - symlinkを追跡せず、非空directoryを再帰削除しない。
 - CLIはモデル指定を必須とし、重複排除、途中失敗、終了コード130、利用者向け案内を契約どおり処理する。
 
-既存のworkspaceテスト、format、全target・全featureのClippy、Lean buildとLean theorem testsを完了条件に含める。Windows固有のロックとrenameは既存のWindows CIで確認する。
+既存のworkspaceテスト、format、全target・全featureのClippy、Lean build、Lean theorem tests、生成fixtureのfreshness、Rust oracleのstrict modeを完了条件に含める。Windows固有のロックとrenameは既存のWindows CIで確認する。
 
 ## 文書
 
 READMEへmodel remove、使用中エラー、失敗時cleanup、強制終了後の次回cleanupを記載する。Range再開、sidecar、validator、backupに関する説明は追加しない。
 
-Issue #5の元の再開要件を実装しない判断と、この設計への変更理由を設計書に残す。GitHub Issue本文の変更やコメント投稿は、この実装には含めない。
+Issue #5の元の再開要件を実装しない判断と、この設計への変更理由を設計書に残す。GitHub Issue本文の変更やコメント投稿は、この実装には含めない。branch完成時に、要件変更を説明するIssueコメント案を利用者へ提示する。
 
 ## セルフレビュー
 
@@ -156,7 +178,9 @@ Issue #5の元の再開要件を実装しない判断と、この設計への変
 - 利用者がコマンドで一つ以上のモデルを削除できる。
 - 使用中のモデルは状態を変えず、待たずにエラーになる。
 - 通常のinstall失敗後に `.part` が残らない。
+- ネットワーク待機中のキャンセルが短時間で終了コード130になる。
 - 強制終了で残った `.part` を次回installまたはremoveが削除する。
 - 未検証ファイルを確定モデルとして使用しない。
 - 実装にRange、sidecar、validator、backup、再開処理が含まれない。
-- Leanの定理とRustテストが、それぞれの抽象化境界で安全性を確認する。
+- Leanが未検証公開とキャンセル後の公開許可を拒否し、壊れた遷移の固定witnessが安全条件の検出能力を確認する。
+- Lean生成fixtureとRust oracleが、検証、キャンセル、公開、removeの対応をstrict modeで確認する。

@@ -261,3 +261,23 @@ fresh reviewerのCriticalは0件だった。Minorとして、HTTP client構築er
 reviewerが判断を留保したWindows固有のlock・rename・directory symlink、SIGKILL時点のdurability、実native inference、disk-full・permission・`sync_all`の実faultは、ローカル成功として扱わない。SIGKILL時点のcleanupは承認済み対象外であり、次回cleanupだけを保証する。実model依存の5 testはignoredのままである。Windows、Linux、macOSのCIはbranchをremoteへ送っていないため未実行であり、merge前の必須確認として残す。
 
 修正後の`cargo fmt`、全target・全featureの厳格Clippy、workspace全testは成功した。workspace testは179件成功、実model・fixture依存の5件だけがignoredだった。Lean buildと`YasumaroTests`も成功し、禁止したresume、sidecar、backup用実装は見つからなかった。
+
+## キャンセル境界と形式モデルの設計改訂
+
+### 第1巡: 要件レビュー
+
+改訂後もinstallはoffset 0から開始し、Range、validator、sidecar、backupを使わない。追加する状態は実行中の検証、キャンセル、公開許可を表すメモリ上の値だけであり、再開用の永続状態ではない。remove、非待機busy、通常失敗時cleanup、強制終了後の次回cleanupという承認済み要件も変更していない。
+
+接続待ちとbody停止中のキャンセルを監視対象へ加えた。通常ファイルへのwriteと`sync_all`は安全に中断できないため、各呼び出しが戻った直後にflagを確認する。この制約を明記し、すべての処理を250ミリ秒以内に止めるという実装不能な契約にはしていない。
+
+### 第2巡: 状態・安全性レビュー
+
+初稿では`partialVerified`と`publishAuthorized`を追加した一方、初期状態の安全条件へ両者を含めていなかった。安全条件を`partialVerified → partial`、`publishAuthorized → partialVerified ∧ writer`まで拡張し、プロセス開始時は検証済みpartial、公開許可、キャンセル要求をfalseと定義した。
+
+キャンセルとrenameの競合には公開許可を置いた。公開許可前のキャンセルはcleanupへ進み、許可後のキャンセルは許可を取り消さない。Leanでは検証、キャンセル要求、公開許可、公開を別eventにし、未検証または許可前キャンセル済みのpartialを公開できないことを証明する。壊れた公開許可遷移の固定witnessも残す。
+
+### 第3巡: 実装品質レビュー
+
+HTTP処理だけを非同期化し、`ModelInstaller`の同期公開APIは維持する。production関数内の公開許可前後に`test-support`の同期点を置き、Rust adapterが同じ処理を観測できるようにした。Lean生成fixtureは`strict`、`internal-fixture`、`model-only`を区別し、期待値をRust側へ重複記述しない。
+
+HTTP clientと非同期runtimeの構築失敗はモデルを選ぶ前に起きるため、モデルIDを持たない`HttpClientInitialization`へ分類した。内部error文字列、URL、完全pathは表示しない。GitHub Issue本文の変更は外部操作として実装範囲に含めず、branch完成時にコメント案だけを提示する。
