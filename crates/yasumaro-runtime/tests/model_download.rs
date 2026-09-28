@@ -159,7 +159,7 @@ fn fresh_download_sends_no_range_and_creates_no_sidecar() {
 }
 
 #[test]
-fn redirect_is_not_followed_or_retried() {
+fn bounded_redirect_is_followed_without_transfer_retry() {
     let bytes = b"redirect target model";
     let requests = Arc::new(AtomicUsize::new(0));
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind redirect server");
@@ -198,8 +198,12 @@ fn redirect_is_not_followed_or_retried() {
     let result = installer.install(&[MODEL]);
     server.join().expect("redirect server exits");
 
-    assert!(matches!(result, Err(ModelError::Download { .. })));
-    assert_eq!(requests.load(Ordering::Relaxed), 1);
+    result.expect("redirected download succeeds");
+    assert_eq!(requests.load(Ordering::Relaxed), 2);
+    assert_eq!(
+        std::fs::read(root.path().join(FINAL_NAME)).expect("read redirected model"),
+        bytes
+    );
     assert_no_partial(&root);
 }
 

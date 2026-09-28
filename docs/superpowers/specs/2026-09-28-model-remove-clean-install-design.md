@@ -57,7 +57,7 @@ Whisperの子プロセスを起動して終了を待つ間、Whisperモデルの
 2. 前回の強制終了で残った `.part` を削除する。削除できなければ通信を始めない。
 3. 確定パスがマニフェストのサイズとSHA-256に一致する通常ファイルなら、通信せず成功する。
 4. 確定パスに不正なファイル、symlink、空directoryがあれば安全に削除する。非空directoryはエラーにする。
-5. URLへ無条件GETを一度送る。Range headerは送らない。HTTP処理には非同期clientを使うが、`ModelInstaller`の公開APIは同期のままにする。
+5. URLへ無条件GETを送る。配布元のredirectは一回の取得試行の中で最大10回まで追跡し、最初のURLがHTTPSならHTTPへのdowngradeを拒否する。失敗した転送を再試行せず、Range headerも送らない。HTTP処理には非同期clientを使うが、`ModelInstaller`の公開APIは同期のままにする。
 6. 接続と各body readを、25ミリ秒間隔のキャンセル監視と競合させる。接続は30秒、データを受信しないreadは60秒で失敗させる。
 7. 決定的な `.part` パスを新規作成し、応答本文を書き込む。既存entryを削除した後に新規作成するため、symlinkを追跡しない。
 8. 期待サイズを超えた時点で停止する。本文終了後に `.part` を同期し、実ファイル長と全体のSHA-256を検証する。
@@ -69,6 +69,8 @@ Whisperの子プロセスを起動して終了を待つ間、Whisperモデルの
 ## キャンセルと強制終了
 
 CLIはinstall開始前にCtrl+C handlerを登録し、installerへcancellation flagを渡す。installerはロック待機、接続待ち、各body read、書き込み、同期、検証、公開許可の前後でflagを確認する。接続とbody readでは非同期処理と25ミリ秒間隔の監視を競合させる。キャンセルを検出したら `.part` を削除し、`Cancelled`を返す。CLIは終了コード130と再実行手順を表示する。
+
+DNS解決を含むblocking taskがキャンセル時に残っても、installerはruntimeの停止待機を100ミリ秒で打ち切る。blocking task自体は中断できずresolverが戻るまで残ることがあるが、キャンセル結果の返却を待たせない。transcribeの共有lock待機とモデル全体検証も25ミリ秒間隔またはhash chunk境界で同じcancellation flagを確認する。
 
 公開許可は、rename直前に行うキャンセルフラグの最終確認で確定する。最終確認でtrueを読んだ場合はcleanupへ進む。falseを読んだ後のキャンセルは現在のモデルの公開を止めず、renameが成功すればinstall成功として扱う。この規則により、同時に起きたキャンセルと公開の結果を一意に決める。
 

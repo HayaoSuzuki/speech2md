@@ -38,6 +38,7 @@ Remove-Item Env:YASUMARO_ENGINE_DIR, Env:YASUMARO_MODEL_DIR, Env:YASUMARO_DIARIZ
 
 ```console
 cargo fmt --all -- --check
+cargo check --workspace --all-targets --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
 ```
@@ -75,6 +76,8 @@ cargo run -p yasumaro-runtime --example model_lifecycle_oracle --features test-s
 | remove成功後はfinalとpartialが存在しない | `model_lifecycle`と`model_cli`のremove test |
 
 Leanの証明対象は抽象状態です。SHA-256の計算、rename、unlink、symlink、OSのfile lock、強制終了時のcleanupはRustの統合テストと各OSのCIで検査します。oracleは両者の結果を対応づけますが、Rustプログラム全体を形式証明するものではありません。
+
+共有lock待機中とモデル検証中のtranscribe cancellationは`model_lifecycle`と`model::store`のtestで検査します。DNSのblocking taskが残る場合のinstaller破棄上限は`model::download`のunit testで検査します。
 
 実行順への依存は、nightlyのシャッフル機能で検査します。
 
@@ -173,7 +176,7 @@ WindowsではVisual StudioのMSVC C++ x64/x86ビルドツール、C++ AddressSan
 
 | ファイル | 検査内容 |
 |---|---|
-| [`ci.yml`](../.github/workflows/ci.yml) | Rustfmtと厳格なClippyを独立したジョブで実行 |
+| [`ci.yml`](../.github/workflows/ci.yml) | Rustfmt、default-featureの全target check、全featureの厳格なClippyを実行 |
 | [`tests.yml`](../.github/workflows/tests.yml) | 4構成のworkspaceテスト |
 | [`formal.yml`](../.github/workflows/formal.yml) | Leanのbuild、実行テスト、fixture freshness、Rust oracleのstrict対応検査 |
 | [`shuffled-tests.yml`](../.github/workflows/shuffled-tests.yml) | nightlyで実行順をランダム化した逐次テストを3回実行 |

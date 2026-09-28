@@ -1,8 +1,11 @@
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read as _};
+use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
 
 use directories::ProjectDirs;
 use fs4::fs_std::FileExt as _;
@@ -12,6 +15,7 @@ use super::{ModelError, ModelId, ModelSpec};
 
 const MODEL_DIRECTORY_ENV: &str = "YASUMARO_MODEL_DIR";
 const VERIFY_BUFFER_SIZE: usize = 64 * 1024;
+const LOCK_RETRY_DELAY: Duration = Duration::from_millis(25);
 
 #[derive(Clone, Debug)]
 pub struct ModelStore {
@@ -74,13 +78,50 @@ impl ModelStore {
     pub fn acquire(&self, spec: &ModelSpec) -> Result<ModelLease, ModelError> {
         let id = spec.id;
         let lock = self.open_lock(id)?;
-        lock.lock_shared()
+        fs4::fs_std::FileExt::lock_shared(&lock)
             .map_err(|error| lock_error(id, "acquire shared lock", &error))?;
+        self.finish_acquire(spec, lock, None)
+    }
+
+    /// Acquires and verifies a shared model lease while observing a cancellation flag.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ModelError::Cancelled`] while waiting for the lock or hashing the model. Other
+    /// errors are the same as [`Self::acquire`].
+    pub fn acquire_with_cancellation(
+        &self,
+        spec: &ModelSpec,
+        cancelled: &AtomicBool,
+    ) -> Result<ModelLease, ModelError> {
+        let id = spec.id;
+        let lock = self.open_lock(id)?;
+        loop {
+            check_cancelled(id, Some(cancelled))?;
+            let acquired = fs4::fs_std::FileExt::try_lock_shared(&lock)
+                .map_err(|error| lock_error(id, "try shared lock", &error))?;
+            if acquired {
+                break;
+            }
+            thread::sleep(LOCK_RETRY_DELAY);
+        }
+        self.finish_acquire(spec, lock, Some(cancelled))
+    }
+
+    fn finish_acquire(
+        &self,
+        spec: &ModelSpec,
+        lock: File,
+        cancelled: Option<&AtomicBool>,
+    ) -> Result<ModelLease, ModelError> {
+        let id = spec.id;
+        check_cancelled(id, cancelled)?;
         let path = self.path(id);
         if !is_regular_file(&path) {
             return Err(missing_model(id));
         }
-        verify_file(spec, &path)?;
+        verify_file(spec, &path, cancelled)?;
+        check_cancelled(id, cancelled)?;
         Ok(ModelLease { path, _lock: lock })
     }
 
@@ -135,15 +176,29 @@ impl ModelStore {
     }
 }
 
-fn verify_file(spec: &ModelSpec, path: &Path) -> Result<(), ModelError> {
+fn verify_file(
+    spec: &ModelSpec,
+    path: &Path,
+    cancelled: Option<&AtomicBool>,
+) -> Result<(), ModelError> {
     let mut file = File::open(path).map_err(|error| storage_error("open final model", &error))?;
+    verify_reader(spec, &mut file, cancelled)
+}
+
+fn verify_reader(
+    spec: &ModelSpec,
+    reader: &mut impl io::Read,
+    cancelled: Option<&AtomicBool>,
+) -> Result<(), ModelError> {
     let mut size = 0_u64;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0_u8; VERIFY_BUFFER_SIZE].into_boxed_slice();
     loop {
-        let count = file
+        check_cancelled(spec.id, cancelled)?;
+        let count = reader
             .read(&mut buffer)
             .map_err(|error| storage_error("read final model", &error))?;
+        check_cancelled(spec.id, cancelled)?;
         if count == 0 {
             break;
         }
@@ -155,6 +210,7 @@ fn verify_file(spec: &ModelSpec, path: &Path) -> Result<(), ModelError> {
             .ok_or_else(|| ModelError::Storage("count final bytes: overflow".into()))?;
         hasher.update(&buffer[..count]);
     }
+    check_cancelled(spec.id, cancelled)?;
     if size != spec.size {
         return Err(ModelError::SizeMismatch {
             id: spec.id,
@@ -171,6 +227,14 @@ fn verify_file(spec: &ModelSpec, path: &Path) -> Result<(), ModelError> {
         });
     }
     Ok(())
+}
+
+fn check_cancelled(id: ModelId, cancelled: Option<&AtomicBool>) -> Result<(), ModelError> {
+    if cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        Err(ModelError::Cancelled { id })
+    } else {
+        Ok(())
+    }
 }
 
 pub(super) fn remove_entry(path: &Path) -> Result<(), ModelError> {
@@ -271,13 +335,64 @@ fn resolve_paths(
 
 #[cfg(test)]
 mod tests {
+    use std::io::{self, Read};
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use directories::ProjectDirs;
+    use sha2::{Digest, Sha256};
+    use url::Url;
 
     use super::{
-        ModelError, ModelRootResolver, RemovalKind, default_model_root, removal_kind, resolve_paths,
+        ModelError, ModelId, ModelRootResolver, ModelSpec, RemovalKind, default_model_root,
+        removal_kind, resolve_paths, verify_reader,
     };
+
+    struct CancelAfterFirstRead<'a> {
+        bytes: &'a [u8],
+        cancelled: &'a AtomicBool,
+        finished: bool,
+    }
+
+    impl Read for CancelAfterFirstRead<'_> {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if self.finished {
+                return Ok(0);
+            }
+            let count = self.bytes.len().min(buffer.len());
+            buffer[..count].copy_from_slice(&self.bytes[..count]);
+            self.finished = true;
+            self.cancelled.store(true, Ordering::Release);
+            Ok(count)
+        }
+    }
+
+    #[test]
+    fn verification_observes_cancellation_between_hash_chunks() {
+        let bytes = b"first verification chunk";
+        let cancelled = AtomicBool::new(false);
+        let spec = ModelSpec {
+            id: ModelId::WhisperBase,
+            engine_version: "test".into(),
+            url: Url::parse("https://example.invalid/model").expect("fixture URL"),
+            size: u64::try_from(bytes.len()).expect("fixture size"),
+            sha256: format!("{:x}", Sha256::digest(bytes)),
+            license: "CC0-1.0".into(),
+            file_name: "ggml-base.bin".into(),
+        };
+        let mut reader = CancelAfterFirstRead {
+            bytes,
+            cancelled: &cancelled,
+            finished: false,
+        };
+
+        assert!(matches!(
+            verify_reader(&spec, &mut reader, Some(&cancelled)),
+            Err(ModelError::Cancelled {
+                id: ModelId::WhisperBase
+            })
+        ));
+    }
 
     #[test]
     fn windows_directory_symlink_uses_directory_removal() {

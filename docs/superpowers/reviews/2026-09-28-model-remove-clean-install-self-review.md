@@ -427,3 +427,37 @@ formal workflowはRust 1.98.1を設定し、Lean build、Lean実行test、fixtur
 修正: strict実行にも`--locked`を追加した。
 
 ローカルのworkspace testは失敗0件で、実model、ローカル音声、外部corpusを必要とする5件だけがignoredだった。macOSでの検証結果であり、WindowsとLinuxのlock、rename、directory symlink分岐、SIGKILL時点のdurability、disk-full、permission、実native inferenceは未実行である。branchをremoteへ送っていないためGitHub Actionsも未実行であり、ローカル成功として扱っていない。
+
+## 最終fresh reviewの修正パス
+
+### 第1巡: 要件レビュー
+
+fresh reviewerはCritical 0件、Important 4件、Minor 0件と判定した。実配布URLの302拒否、DNS解決キャンセル後のruntime drop待機、transcribeの共有lock待機とhash検証、default-feature targetのcompile失敗である。いずれも利用者が通常のinstallまたはtranscribeで到達するため、4件ともImportantのまま一回の修正パスへ入れた。
+
+指摘: 「GETを一度だけ送る」をredirectも禁止する意味に解釈した結果、Hugging FaceとGitHub Releasesの配布URLが返す302を拒否し、新規installが失敗する。
+
+修正: 一回の取得試行の中で最大10回のredirectを許可し、HTTPSからHTTPへのdowngradeを拒否した。redirect先から失敗した転送を再試行せず、Range、validator、sidecar、backup、offset再開も追加していない。local serverのtestは旧実装で302を返してRED、修正後は初回とredirect先の2 requestだけで検証済みモデルを公開してGREENになった。
+
+### 第2巡: 状態・安全性レビュー
+
+redirectはpartial作成前のHTTP接続経路だけを変え、検証、公開許可、renameの順序を変更しない。redirect先のbytesも同じmanifest sizeとSHA-256で全体検証する。公開許可前後のLean状態とRust checkpointに変更はない。
+
+指摘1: reqwestの既定resolverが作るblocking DNS taskはrequest futureのcancelでは停止せず、所有runtimeのdropが待ち続けるため、CLIが`Cancelled`を得ても終了が遅れる。
+
+修正1: `ModelInstaller`がruntimeを明示的に所有し、drop時の停止待機を100ミリ秒に制限した。blocking resolverを注入したtestは旧実装で250ミリ秒の受信上限を超えてRED、修正後はresolverを解放する前に`Cancelled`を返してGREENになった。中断不能なresolver threadが戻るまで残り得る制約は設計書へ記載した。
+
+指摘2: transcribeが追加した共有lock取得はblockingで、待機中とモデル全体hash中にCtrl+C flagを確認しない。
+
+修正2: `acquire_with_cancellation`は共有lockを25ミリ秒間隔で試し、取得後の各hash chunk境界でもflagを確認する。writerを保持したtestと、最初のchunk読取後にflagを立てるtestは未定義APIでRED、実装後にGREENになった。CLIは話者分離用2モデル、pipelineはWhisperモデルの取得へ同じflagを渡す。
+
+再確認で、話者モデル取得中の`Cancelled`をmodel installのerrorとして返すと、終了コード130でも再installを促す誤ったhelpが表示される経路を見つけた。transcribe用の取得では`RuntimeError::Cancelled`へ正規化し、130かつinstall helpなしを回帰testで固定した。
+
+### 第3巡: 実装品質レビュー
+
+指摘: `model_download` integration testと`model_lifecycle_oracle` exampleは`test-support`専用APIを無条件に参照し、default-featureの`cargo check --all-targets`がexit 101になった。
+
+修正: 両targetへ`required-features = ["test-support"]`を指定した。再実行したdefault-feature全target checkは成功した。CIにもdefault-featureのworkspace全target checkを追加し、全feature Clippyだけではこの回帰を見落とす構成を解消した。
+
+3巡の再確認では、redirect chainがboundedでHTTPS downgradeを拒否すること、キャンセル追加がremoveの非待機規則や公開許可後の成功規則を変えないこと、test-support APIが通常buildへ露出しないことを確認した。設計書、README、testing文書は実装と同じ境界へ更新した。
+
+workspace再検証では、単独実行で成功するWhisper lease解放testが並列実行で2回続けて`ModelInUse`になった。Rust 1.98のinherentな`File::lock_shared`と、removeが使うfs4の排他lock APIが混在していたため、共有lockもfs4を明示して同じ実装へ統一した。修正後はworkspace全testが成功し、該当test binaryの並列実行も5回連続で成功した。

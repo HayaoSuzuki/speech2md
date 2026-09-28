@@ -8,6 +8,7 @@ use std::thread;
 use std::time::Duration;
 
 use reqwest::Client;
+use reqwest::redirect::Policy;
 use sha2::{Digest, Sha256};
 use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 
@@ -18,6 +19,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
 const LOCK_RETRY_DELAY: Duration = Duration::from_millis(25);
 const CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
+const MAX_REDIRECTS: usize = 10;
 const BUFFER_SIZE: usize = 64 * 1_024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -30,7 +33,7 @@ pub struct ModelInstaller {
     manifest: ModelManifest,
     store: ModelStore,
     client: Client,
-    runtime: Runtime,
+    runtime: Option<Runtime>,
     #[cfg(feature = "test-support")]
     publish_observer: Option<Arc<dyn Fn(PublishCheckpoint) + Send + Sync>>,
 }
@@ -92,14 +95,14 @@ impl ModelInstaller {
         let client = Client::builder()
             .connect_timeout(connect_timeout)
             .read_timeout(read_timeout)
-            .redirect(reqwest::redirect::Policy::none())
+            .redirect(model_redirect_policy())
             .build()
             .map_err(|_| ModelError::HttpClientInitialization)?;
         Ok(Self {
             manifest,
             store,
             client,
-            runtime,
+            runtime: Some(runtime),
             #[cfg(feature = "test-support")]
             publish_observer: None,
         })
@@ -227,7 +230,10 @@ impl ModelInstaller {
         path: &Path,
         cancelled: &AtomicBool,
     ) -> Result<(), ModelError> {
-        self.runtime.block_on(download_and_verify_async(
+        let Some(runtime) = &self.runtime else {
+            return Err(ModelError::HttpClientInitialization);
+        };
+        runtime.block_on(download_and_verify_async(
             &self.client,
             spec,
             path,
@@ -256,6 +262,32 @@ impl ModelInstaller {
         #[cfg(not(feature = "test-support"))]
         let _ = checkpoint;
     }
+}
+
+impl Drop for ModelInstaller {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
+        }
+    }
+}
+
+fn model_redirect_policy() -> Policy {
+    Policy::custom(|attempt| {
+        if redirect_is_allowed(attempt.previous(), attempt.url()) {
+            attempt.follow()
+        } else {
+            attempt.error("model redirect rejected")
+        }
+    })
+}
+
+fn redirect_is_allowed(previous: &[url::Url], next: &url::Url) -> bool {
+    let within_limit = previous.len() <= MAX_REDIRECTS;
+    let downgrades_https = previous
+        .first()
+        .is_some_and(|initial| initial.scheme() == "https" && next.scheme() != "https");
+    within_limit && !downgrades_https
 }
 
 async fn download_and_verify_async(
@@ -426,6 +458,133 @@ fn download_error(id: ModelId, error: &reqwest::Error) -> ModelError {
 
 fn storage_error(operation: &str, error: &io::Error) -> ModelError {
     ModelError::Storage(format!("{operation}: {}", error.kind()))
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex, mpsc};
+    use std::thread;
+    use std::time::Duration;
+
+    use reqwest::dns::{Addrs, Name, Resolve, Resolving};
+    use sha2::{Digest, Sha256};
+    use tempfile::TempDir;
+    use url::Url;
+
+    use super::{MAX_REDIRECTS, ModelInstaller, RuntimeBuilder, redirect_is_allowed};
+    use crate::{ModelError, ModelId, ModelManifest, ModelSpec, ModelStore};
+
+    #[derive(Debug)]
+    struct BlockingResolver {
+        started: mpsc::Sender<()>,
+        release: Arc<Mutex<mpsc::Receiver<()>>>,
+    }
+
+    #[test]
+    fn redirect_policy_is_bounded_and_rejects_https_downgrade() {
+        let secure = Url::parse("https://models.example/first").expect("secure URL");
+        let next_secure = Url::parse("https://cdn.example/model").expect("secure CDN URL");
+        let next_insecure = Url::parse("http://cdn.example/model").expect("insecure CDN URL");
+
+        assert!(redirect_is_allowed(
+            std::slice::from_ref(&secure),
+            &next_secure
+        ));
+        assert!(!redirect_is_allowed(
+            std::slice::from_ref(&secure),
+            &next_insecure
+        ));
+        assert!(!redirect_is_allowed(
+            &vec![secure; MAX_REDIRECTS + 1],
+            &next_secure
+        ));
+    }
+
+    impl Resolve for BlockingResolver {
+        fn resolve(&self, _name: Name) -> Resolving {
+            let started = self.started.clone();
+            let release = Arc::clone(&self.release);
+            Box::pin(async move {
+                let result = tokio::task::spawn_blocking(move || {
+                    let _ignored = started.send(());
+                    let _ignored = release
+                        .lock()
+                        .ok()
+                        .and_then(|receiver| receiver.recv().ok());
+                    Box::new(std::iter::empty()) as Addrs
+                })
+                .await;
+                match result {
+                    Ok(addresses) => Ok(addresses),
+                    Err(error) => Err(Box::new(error) as Box<dyn std::error::Error + Send + Sync>),
+                }
+            })
+        }
+    }
+
+    #[test]
+    fn cancellation_is_not_delayed_by_runtime_drop_after_blocking_dns() {
+        let root = TempDir::new().expect("temporary model root");
+        let bytes = b"model";
+        let manifest = ModelManifest::new(vec![ModelSpec {
+            id: ModelId::WhisperBase,
+            engine_version: "test".into(),
+            url: Url::parse("http://dns-stall.invalid/model").expect("fixture URL"),
+            size: u64::try_from(bytes.len()).expect("fixture size"),
+            sha256: format!("{:x}", Sha256::digest(bytes)),
+            license: "CC0-1.0".into(),
+            file_name: "ggml-base.bin".into(),
+        }])
+        .expect("valid manifest");
+        let (dns_started_tx, dns_started_rx) = mpsc::channel();
+        let (dns_release_tx, dns_release_rx) = mpsc::channel();
+        let resolver = Arc::new(BlockingResolver {
+            started: dns_started_tx,
+            release: Arc::new(Mutex::new(dns_release_rx)),
+        });
+        let runtime = RuntimeBuilder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .expect("runtime");
+        let client = reqwest::Client::builder()
+            .dns_resolver(resolver)
+            .build()
+            .expect("client");
+        let installer = ModelInstaller {
+            manifest,
+            store: ModelStore::new(root.path()),
+            client,
+            runtime: Some(runtime),
+            #[cfg(feature = "test-support")]
+            publish_observer: None,
+        };
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancelled = Arc::clone(&cancelled);
+        let (result_tx, result_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let result = installer
+                .install_with_cancellation(&[ModelId::WhisperBase], worker_cancelled.as_ref());
+            drop(installer);
+            let _ignored = result_tx.send(result);
+        });
+        dns_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("DNS resolution starts");
+
+        cancelled.store(true, Ordering::Release);
+        let prompt_result = result_rx.recv_timeout(Duration::from_millis(250));
+        let _ignored = dns_release_tx.send(());
+        worker.join().expect("installer worker exits");
+
+        assert!(matches!(
+            prompt_result.expect("cancelled installer returns before DNS unblocks"),
+            Err(ModelError::Cancelled {
+                id: ModelId::WhisperBase
+            })
+        ));
+    }
 }
 
 #[cfg(test)]

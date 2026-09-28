@@ -43,6 +43,16 @@ name = "fake_whisper"
 path = "src/bin/fake_whisper.rs"
 required-features = ["test-support"]
 
+[[test]]
+name = "model_download"
+path = "tests/model_download.rs"
+required-features = ["test-support"]
+
+[[example]]
+name = "model_lifecycle_oracle"
+path = "examples/model_lifecycle_oracle.rs"
+required-features = ["test-support"]
+
 [dev-dependencies]
 tracing-subscriber.workspace = true
 filetime = "0.2"

@@ -168,11 +168,21 @@ fn execute_transcribe(arguments: &TranscribeArgs) -> Result<String, AppError> {
     let model_manifest = ModelManifest::embedded()?;
     let model_store = ModelStore::new(ModelRootResolver::resolve()?);
     let threads = std::thread::available_parallelism().map_or(1, usize::from);
-    let segmentation = model_store.acquire(model_manifest.spec(ModelId::SpeakerSegmentation)?)?;
-    let embedding = model_store.acquire(model_manifest.spec(ModelId::SpeakerEmbedding)?)?;
+    let cancelled = cancellation_flag()?;
+    let segmentation = model_store
+        .acquire_with_cancellation(
+            model_manifest.spec(ModelId::SpeakerSegmentation)?,
+            cancelled.as_ref(),
+        )
+        .map_err(map_transcribe_model_acquire)?;
+    let embedding = model_store
+        .acquire_with_cancellation(
+            model_manifest.spec(ModelId::SpeakerEmbedding)?,
+            cancelled.as_ref(),
+        )
+        .map_err(map_transcribe_model_acquire)?;
     let diarizer = SherpaDiarizer::new(segmentation, embedding, threads)
         .map_err(|error| RuntimeError::Diarization(error.to_string()))?;
-    let cancelled = cancellation_flag()?;
     let title = arguments
         .input
         .file_stem()
@@ -225,6 +235,13 @@ fn cancellation_flag() -> Result<Arc<AtomicBool>, AppError> {
     ctrlc::set_handler(move || trigger.store(true, Ordering::Release))
         .map_err(|error| AppError::Configuration(error.to_string()))?;
     Ok(cancelled)
+}
+
+fn map_transcribe_model_acquire(error: ModelError) -> AppError {
+    match error {
+        ModelError::Cancelled { .. } => RuntimeError::Cancelled.into(),
+        other => other.into(),
+    }
 }
 
 fn doctor() -> Result<String, AppError> {
@@ -330,7 +347,10 @@ fn display_name(path: &Path) -> String {
 mod tests {
     use clap::Parser;
 
-    use super::{AppError, Cli, Command, ModelError, ModelId, classify, help};
+    use super::{
+        AppError, Cli, Command, ModelError, ModelId, RuntimeError, classify, help,
+        map_transcribe_model_acquire,
+    };
 
     #[test]
     fn transcription_choices_resolve_to_the_selected_model() {
@@ -372,6 +392,17 @@ mod tests {
             help(&error)
                 .is_some_and(|text| { text.contains("yasumaro model install whisper-small") })
         );
+    }
+
+    #[test]
+    fn transcription_model_acquire_cancellation_has_no_install_help() {
+        let error = map_transcribe_model_acquire(ModelError::Cancelled {
+            id: ModelId::SpeakerSegmentation,
+        });
+
+        assert!(matches!(error, AppError::Runtime(RuntimeError::Cancelled)));
+        assert_eq!(classify(&error), 130);
+        assert_eq!(help(&error), None);
     }
 
     #[test]

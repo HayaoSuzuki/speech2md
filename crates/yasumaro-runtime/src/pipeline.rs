@@ -98,7 +98,10 @@ pub fn run_transcription(
     let installed = services.engine_store.require(services.engine_spec)?;
     let lease = installed.acquire()?;
     let whisper_spec = services.model_manifest.spec(options.whisper_model)?;
-    let whisper_model = services.model_store.acquire(whisper_spec)?;
+    let whisper_model = services
+        .model_store
+        .acquire_with_cancellation(whisper_spec, options.cancelled.as_ref())
+        .map_err(map_model_acquire_error)?;
     let transcriber =
         WhisperProcessTranscriber::new(lease, whisper_model, job.path().to_path_buf())
             .map_err(|error| map_transcription_error(&error))?;
@@ -194,6 +197,13 @@ fn map_transcription_error(error: &EngineError) -> RuntimeError {
         RuntimeError::Cancelled
     } else {
         RuntimeError::Transcription(error.to_string())
+    }
+}
+
+fn map_model_acquire_error(error: crate::ModelError) -> RuntimeError {
+    match error {
+        crate::ModelError::Cancelled { .. } => RuntimeError::Cancelled,
+        other => RuntimeError::Model(other),
     }
 }
 

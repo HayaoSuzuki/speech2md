@@ -1,6 +1,11 @@
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
 
+use fs4::fs_std::FileExt as _;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use url::Url;
@@ -68,6 +73,45 @@ fn acquire_holds_a_shared_lease_for_a_regular_model() {
     drop(lease);
     store.remove(MODEL).expect("remove after lease release");
     assert!(!final_path.exists());
+}
+
+#[test]
+fn cancellable_acquire_stops_waiting_for_a_writer() {
+    let (root, store) = store();
+    let bytes = b"verified model";
+    fs::write(root.path().join(FINAL_NAME), bytes).expect("write model");
+    let model = spec(MODEL, FINAL_NAME, bytes);
+    let lock_directory = root.path().join(".locks");
+    fs::create_dir_all(&lock_directory).expect("create lock directory");
+    let writer = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_directory.join("whisper-base.lock"))
+        .expect("open lock");
+    writer.lock_exclusive().expect("hold writer lock");
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let worker_cancelled = Arc::clone(&cancelled);
+    let (result_tx, result_rx) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        let result = store.acquire_with_cancellation(&model, worker_cancelled.as_ref());
+        let _ignored = result_tx.send(result);
+    });
+    thread::sleep(Duration::from_millis(50));
+    assert!(matches!(
+        result_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+
+    cancelled.store(true, Ordering::Release);
+    let result = result_rx
+        .recv_timeout(Duration::from_millis(250))
+        .expect("cancelled acquire returns while writer stays locked");
+    fs4::fs_std::FileExt::unlock(&writer).expect("release writer lock");
+    worker.join().expect("acquire worker exits");
+
+    assert!(matches!(result, Err(ModelError::Cancelled { id: MODEL })));
 }
 
 #[test]
