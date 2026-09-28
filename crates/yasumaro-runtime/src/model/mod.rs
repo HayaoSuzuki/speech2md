@@ -4,7 +4,7 @@ mod store;
 
 pub use download::ModelInstaller;
 pub use manifest::{ModelId, ModelManifest, ModelSpec};
-pub use store::{ModelRootResolver, ModelStore};
+pub use store::{ModelLease, ModelRootResolver, ModelStore};
 
 use thiserror::Error;
 
@@ -33,6 +33,10 @@ pub enum ModelError {
         expected: String,
         actual: String,
     },
+    #[error("model {id} lock operation failed: {message}")]
+    Lock { id: ModelId, message: String },
+    #[error("model {id} is in use")]
+    ModelInUse { id: ModelId },
     #[error("model storage operation failed: {0}")]
     Storage(String),
 }

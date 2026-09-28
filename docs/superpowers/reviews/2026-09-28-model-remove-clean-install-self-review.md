@@ -113,3 +113,27 @@ install、remove、leaseの状態変化をTask間で追跡した。Task 2がlock
 指摘: 最初の証明では未使用のsimp引数、不要な`simpa`、deprecatedな`if_pos`による警告が出た。
 
 修正: 明示的な場合分けは維持し、簡約手順だけを整理した。READMEにはLeanが証明する抽象状態と、Rustテストで検査するハッシュ計算、rename、unlink、OS lockの境界を記載した。
+
+## Task 2: ModelStoreのlock、lease、remove
+
+### 第1巡: 要件レビュー
+
+`ModelStore`は確定モデル、`.part`、`.locks/<model>.lock`だけを作成・削除対象にする。`remove`は`try_lock_exclusive`を一度だけ呼び、`Ok(false)`だけを`ModelInUse`へ分類する。lock directoryの作成、lock fileのopen、lock APIの失敗は`Lock`となる。lock fileはremove後も残し、次の操作で再利用する。
+
+指摘: Task 3だけが使うblocking版`lock_exclusive`をTask 2で実装するとdead-code警告が発生し、公開API化またはallow属性が必要になる。
+
+修正: lock fileの作成とerror正規化はTask 2で実装し、blocking wrapper本体だけTask 3のinstaller接続時に追加する判断をledgerへ記録した。利用者向けAPIを計画上の都合で広げていない。
+
+### 第2巡: 状態・安全性レビュー
+
+`acquire`は共有lock取得後に`symlink_metadata`で確定モデルを再検査し、regular fileだけを`ModelLease`へ格納する。`remove`は排他lock取得後にpartial、finalの順で処理する。partialが非空directoryで削除できないテストでは、finalが保持される。lease中のremoveは1秒未満で`ModelInUse`を返し、状態を変更しない。symlinkはリンク自体を削除し、外部targetを保持する。directoryは`remove_dir`だけを使うため再帰削除しない。
+
+指摘: UnixとWindowsではdirectory symlinkの削除APIが異なる。`symlink_metadata`の`is_dir()`だけで分岐すると、Windowsのdirectory symlinkを`remove_file`へ渡す。
+
+修正: platform-independentな削除分類を追加し、Windowsでは`FileTypeExt::is_symlink_dir`を使って`remove_dir`へ分類する。分類testを実装前に失敗させ、実装後に成功させた。
+
+### 第3巡: 実装品質レビュー
+
+partial pathは`OsString`へ`.part`を追加するため、非UTF-8のmodel rootを文字列へ変換しない。lockとstorage errorは操作名と`ErrorKind`だけを保持し、完全なローカルpathを含めない。publicな`acquire`、`remove`、`ModelLease::path`には契約とerror条件を記載した。Clippyの`filetype_is_file`は、symlinkと特殊fileを拒否する要件により意図的に許可し、理由を属性へ記載した。
+
+Windows targetのcross-checkは、crate本体へ到達する前にローカル環境へWindows SDK headerがないため`ring`のbuild scriptで停止した。この結果はWindows成功として扱わない。Windows固有分岐は公式の`FileTypeExt`に限定し、最終判断はWindows CIへ残す。現在のplatformでは全target・全featureのClippyとruntime testが成功した。
