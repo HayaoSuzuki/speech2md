@@ -1,6 +1,6 @@
 name = "yasumaro-formal"
 version = "0.1.0"
-defaultTargets = ["YasumaroTests", "testgen"]
+defaultTargets = ["YasumaroTests", "testgen", "model-lifecycle-testgen"]
 
 [[lean_lib]]
 name = "Yasumaro"
@@ -12,3 +12,7 @@ root = "YasumaroTests"
 [[lean_exe]]
 name = "testgen"
 root = "TestGen"
+
+[[lean_exe]]
+name = "model-lifecycle-testgen"
+root = "ModelLifecycleTestGen"

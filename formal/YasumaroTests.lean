@@ -2,6 +2,7 @@ import Yasumaro.SpeakerAssignment
 import Yasumaro.Proofs
 import Yasumaro.TestVectors
 import Yasumaro.ModelLifecycleProofs
+import Yasumaro.ModelLifecycleTestVectors
 
 open Yasumaro
 
@@ -96,3 +97,25 @@ def main : IO Unit := do
   assertEqual "cancellation after authorization does not block publication"
     authorizedThenCancelled
     { publishedInitial with cancelRequested := true }
+  assertEqual "model lifecycle cases have stable names"
+    (modelLifecycleCases.map (·.name))
+    ["verified-publish", "unverified-publish",
+      "cancel-before-authorization", "cancel-after-authorization",
+      "busy-remove", "remove-success", "broken-authorization"]
+  assertEqual "model lifecycle cases have stable modes"
+    (modelLifecycleCases.map (·.mode))
+    ["strict", "strict", "internal-fixture", "internal-fixture",
+      "strict", "strict", "model-only"]
+  assertEqual "model lifecycle cases have stable results"
+    (modelLifecycleCases.map (·.expectedResult))
+    ["success", "hash-mismatch", "cancelled", "success",
+      "model-in-use", "success", "broken-sensitivity"]
+  assertEqual "normal expectations come from the executable transition model"
+    (modelLifecycleCases.map (·.expected))
+    (modelLifecycleCases.map fun testCase => run testCase.start testCase.events)
+  assertEqual "only the sensitivity case has a broken expectation"
+    (modelLifecycleCases.map (·.brokenExpected.isSome))
+    [false, false, false, false, false, false, true]
+  assertEqual "model lifecycle fixture is valid JSON"
+    (Lean.Json.parse modelLifecycleTestVectorsJson).isOk
+    true

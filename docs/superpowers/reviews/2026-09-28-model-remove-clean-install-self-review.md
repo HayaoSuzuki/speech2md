@@ -321,3 +321,29 @@ Review Focusの5項目には、それぞれTask 3またはTask 4のtest名と実
 指摘: 証明の初回GREENにはdeprecatedな`if_pos`と`if_neg`の警告が残った。
 
 修正: Lean 4.34の`ite_eq_left`と`ite_eq_right`へ置き換え、警告なしのbuildを完了条件とした。
+
+## Lean生成fixture
+
+### 第1巡: 要件レビュー
+
+fixtureは正常公開、hash不一致、公開許可前キャンセル、公開許可後キャンセル、busy remove、remove成功の6 production対応caseと、壊れた公開許可の1 sensitivity caseだけを含む。modeは`strict`、`internal-fixture`、`model-only`に限定し、Range、再開、validator、backupに対応するcaseは追加していない。schema versionは1、case順序と期待結果は`YasumaroTests`で固定した。
+
+指摘: 計画のgenerator commandは`lake -d formal`を実行すればcwdも`formal/`へ移る前提で`../crates/...`を指定していたが、Lakeはrepository rootのcwdを維持した。
+
+修正: repository rootから実行するcommandは`crates/yasumaro-runtime/tests/fixtures/lean-model-lifecycle.json`へ統一した。generatorはcallerの相対pathをそのまま扱い、特殊なpath解決規則を持たせていない。この差は実行台帳へRulingとして記録した。
+
+### 第2巡: 状態・安全性レビュー
+
+各caseの`expected`はprivateな`makeCase`が`run start events`から計算し、呼出側が独立した期待状態を書けない。Lean実行testでも全caseについて`expected = run start events`を再確認する。壊れた期待状態はsensitivity caseだけに存在し、同じstartとeventsを`brokenAuthorizeStep`へ渡して生成する。JSONにはstart、event列、正常期待状態、壊れた期待状態をすべて出力する。
+
+指摘: 初稿のテストはfield値を確認したが、rendererが不正なJSONを生成する変異を検出できなかった。
+
+修正: `Lean.Json.parse modelLifecycleTestVectorsJson`の成功を実行testへ追加し、生成後は`jq`でもschema version 1、7 case、mode、期待結果を確認した。
+
+### 第3巡: 実装品質レビュー
+
+generatorは標準出力、`--output`、`--check`を持ち、`--check`の一致は0、不一致または読取失敗は1、不正引数は2を返す。不正引数と存在しないfixtureを実行し、それぞれexit 2と1を観測した。読取・書込errorは固定文言へ正規化し、指定pathを出力しない。
+
+指摘: 最初の`--output`失敗は`IO.FS.writeFile`の未処理例外により完全pathを表示した。
+
+修正: 書込も専用関数で捕捉し、固定文言とexit 1へ正規化した。存在しない親directoryを指定する実行testで、path非露出と終了コードを確認した。生成fixtureのfreshness checkはfileを書き換えずに成功した。
