@@ -295,3 +295,29 @@ Task間のinterfaceは`State → Event → State`の壊れた遷移、schema ver
 ### 第3巡: 実装品質レビュー
 
 Review Focusの5項目には、それぞれTask 3またはTask 4のtest名と実行commandがある。read timeoutより短い間隔で進むresponseは旧実装でも成功するため、REDではなく非同期化前後のcharacterization testとして記録した。各Taskはtest追加、RED確認、最小実装、GREEN確認、3巡レビュー、commitの順になっている。placeholder、未定義の後続判断、期待値をRustへ重複記述するstepはない。
+
+## 検証、キャンセル、公開許可を分離したLean状態機械
+
+### 第1巡: 要件レビュー
+
+状態には`partialVerified`、`publishAuthorized`、`cancelRequested`だけを追加し、HTTP Range、validator、sidecar、backup、再開offsetなどの永続状態は追加していない。公開は検証成功、未キャンセルの公開許可、公開の三段階に分けた。公開許可前のキャンセルでは許可と公開がno-opになり、公開許可後のキャンセルでは許可が維持される。
+
+指摘: 公開許可前キャンセルの最初の実行例は`published` fieldだけを比較していたため、誤って他の状態を変更する遷移を検出できなかった。
+
+修正: 未公開の初期状態からイベント列を実行し、未公開、検証済みpartial、未許可、キャンセル済み、writer保持中という最終状態全体を比較するようにした。
+
+### 第2巡: 状態・安全性レビュー
+
+`Safe`は、検証済みfinal、partial検証とpartial存在、公開許可とpartial検証・writer保持、writerとreader排他の四条件を持つ。`step_preserves`は全11種類のeventと成立・不成立分岐を扱い、`run_preserves`が任意のevent列へ保存結果を拡張する。cleanup成功はpartial関連状態を消去し、cleanup失敗はpartialと検証状態を保持したまま公開許可とwriterを消去する。remove成功は全artifact状態を消去する。
+
+指摘: 自動簡約だけに依存した初稿では、Bool条件が過剰に書き換えられ、no-op分岐と状態更新分岐の対応が証明項から読み取りにくかった。
+
+修正: 各条件を`ite_eq_left`または`ite_eq_right`で明示的に選び、更新分岐ごとに四つの安全条件を構成した。未検証partialとキャンセル済みpartialを許可する`brokenAuthorizeStep`には固定witnessを置き、正常遷移の安全性と壊れた遷移の非安全性を同じ定理で確認した。
+
+### 第3巡: 実装品質レビュー
+
+定理名は後続fixtureが参照する契約どおりで、実行例は検証なし、許可前キャンセル、許可後キャンセルを別々に検査する。`sorry`、`admit`、`native_decide`は追加していない。旧`publishVerified` eventは残しておらず、検証と公開を一段で通過する経路もない。
+
+指摘: 証明の初回GREENにはdeprecatedな`if_pos`と`if_neg`の警告が残った。
+
+修正: Lean 4.34の`ite_eq_left`と`ite_eq_right`へ置き換え、警告なしのbuildを完了条件とした。

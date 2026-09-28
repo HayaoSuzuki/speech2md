@@ -7,6 +7,9 @@ theorem verified_initial_safe (partialPresent : Bool) (readers : Nat) :
       published := true
       publishedVerified := true
       «partial» := partialPresent
+      partialVerified := false
+      publishAuthorized := false
+      cancelRequested := false
       readers := readers
       writer := false
     } := by
@@ -16,49 +19,86 @@ theorem step_preserves (state : State) (event : Event)
     (safe : Safe state) : Safe (step state event) := by
   cases event with
   | beginInstall =>
-      by_cases available : state.readers = 0 ∧ state.writer = false
-      · unfold Safe
-        constructor
-        · simpa [step, available] using safe.1
-        · simp [step, available]
-      · simpa [step, available] using safe
+      by_cases available : state.readers = 0 ∧ state.writer = false ∧
+          state.cancelRequested = false
+      · rw [step, ite_eq_left available]
+        unfold Safe
+        exact ⟨safe.1, safe.2.1, by simp, fun _ => available.1⟩
+      · rw [step, ite_eq_right available]
+        exact safe
   | createPartial =>
       by_cases writer : state.writer = true
-      · simpa [step, writer, Safe] using safe
-      · simpa [step, writer] using safe
-  | publishVerified =>
+      · rw [step, ite_eq_left writer]
+        unfold Safe
+        exact ⟨safe.1, by simp, by simp, safe.2.2.2⟩
+      · rw [step, ite_eq_right writer]
+        exact safe
+  | verifyPartial =>
       by_cases ready : state.writer = true ∧ state.«partial» = true
+      · rw [step, ite_eq_left ready]
+        unfold Safe
+        refine ⟨safe.1, (fun _ => ready.2), ?_, safe.2.2.2⟩
+        intro authorized
+        exact ⟨rfl, (safe.2.2.1 authorized).2⟩
+      · rw [step, ite_eq_right ready]
+        exact safe
+  | requestCancel =>
+      simpa [step, Safe] using safe
+  | authorizePublish =>
+      by_cases ready : state.writer = true ∧ state.«partial» = true ∧
+          state.partialVerified = true ∧ state.cancelRequested = false
+      · rw [step, ite_eq_left ready]
+        unfold Safe
+        exact ⟨safe.1, safe.2.1, fun _ => ⟨ready.2.2.1, ready.1⟩,
+          safe.2.2.2⟩
+      · rw [step, ite_eq_right ready]
+        exact safe
+  | publish =>
+      by_cases ready : state.writer = true ∧ state.«partial» = true ∧
+          state.partialVerified = true ∧ state.publishAuthorized = true
       · simp [step, ready, Safe]
-      · simpa [step, ready] using safe
+      · rw [step, ite_eq_right ready]
+        exact safe
   | abort cleanupSucceeded =>
       by_cases writer : state.writer = true
-      · unfold Safe
-        constructor
-        · simpa [step, writer] using safe.1
-        · simp [step, writer]
-      · simpa [step, writer] using safe
+      · by_cases cleanup : cleanupSucceeded = true
+        · rw [step, ite_eq_left writer]
+          simp [cleanup, Safe]
+          exact safe.1
+        · rw [step, ite_eq_left writer]
+          simp only [cleanup, Bool.false_eq_true, ite_false]
+          unfold Safe
+          exact ⟨safe.1, safe.2.1, by simp, by simp⟩
+      · rw [step, ite_eq_right writer]
+        exact safe
   | acquireLease =>
       by_cases available : state.writer = false ∧ state.published = true ∧
           state.publishedVerified = true
-      · unfold Safe
-        constructor
-        · simp [step, available]
-        · simp [step, available]
-      · simpa [step, available] using safe
+      · rw [step, ite_eq_left available]
+        unfold Safe
+        refine ⟨safe.1, safe.2.1, ?_, ?_⟩
+        intro authorized
+        have writer := (safe.2.2.1 authorized).2
+        simp_all
+        intro writer
+        simp_all
+      · rw [step, ite_eq_right available]
+        exact safe
   | releaseLease =>
       by_cases hasReader : 0 < state.readers
-      · simp only [step, hasReader]
+      · rw [step, ite_eq_left hasReader]
         unfold Safe
-        constructor
-        · exact safe.1
-        · intro writer
-          have noReaders := safe.2 writer
-          omega
-      · simpa [step, hasReader] using safe
+        refine ⟨safe.1, safe.2.1, safe.2.2.1, ?_⟩
+        intro writer
+        have noReaders := safe.2.2.2 writer
+        omega
+      · rw [step, ite_eq_right hasReader]
+        exact safe
   | remove =>
       by_cases available : state.writer = false ∧ state.readers = 0
       · simp [step, available, Safe]
-      · simpa [step, available] using safe
+      · rw [step, ite_eq_right available]
+        exact safe
 
 theorem run_preserves (state : State) (events : List Event)
     (safe : Safe state) : Safe (run state events) := by
@@ -77,6 +117,39 @@ theorem cleanup_failure_preserves_publication (state : State) :
     (step state (.abort false)).published = state.published ∧
       (step state (.abort false)).publishedVerified = state.publishedVerified := by
   by_cases writer : state.writer = true <;> simp [step, writer]
+
+theorem unverified_partial_cannot_be_authorized (state : State)
+    (unauthorized : state.publishAuthorized = false)
+    (unverified : state.partialVerified = false) :
+    (step state .authorizePublish).publishAuthorized = false := by
+  simp [step, unverified, unauthorized]
+
+theorem cancel_before_authorization_blocks_publication (state : State)
+    (unauthorized : state.publishAuthorized = false)
+    (cancelled : state.cancelRequested = true) :
+    step (step state .authorizePublish) .publish =
+      step state .authorizePublish := by
+  simp [step, cancelled, unauthorized]
+
+theorem cancel_after_authorization_preserves_authorization (state : State)
+    (authorized : state.publishAuthorized = true) :
+    (step state .requestCancel).publishAuthorized = true := by
+  simpa [step] using authorized
+
+private def brokenAuthorizationWitness : State :=
+  { published := false
+    publishedVerified := false
+    «partial» := true
+    partialVerified := false
+    publishAuthorized := false
+    cancelRequested := true
+    readers := 0
+    writer := true }
+
+theorem broken_authorization_violates_safety :
+    Safe (step brokenAuthorizationWitness .authorizePublish) ∧
+      ¬Safe (brokenAuthorizeStep brokenAuthorizationWitness .authorizePublish) := by
+  simp [brokenAuthorizationWitness, step, brokenAuthorizeStep, Safe]
 
 theorem busy_remove_noop (state : State)
     (busy : state.writer = true ∨ 0 < state.readers) :

@@ -13,6 +13,10 @@ open Yasumaro
 #check busy_remove_noop
 #check successful_remove_clears_artifacts
 #check remove_idempotent
+#check unverified_partial_cannot_be_authorized
+#check cancel_before_authorization_blocks_publication
+#check cancel_after_authorization_preserves_authorization
+#check broken_authorization_violates_safety
 
 private def tenPercent : OverlapThreshold := ⟨1, 10, by omega, by omega⟩
 private def quarter : OverlapThreshold := ⟨1, 4, by omega, by omega⟩
@@ -48,10 +52,14 @@ def main : IO Unit := do
   assertEqual "published initial state is verified"
     publishedInitial
     { published := true, publishedVerified := true, «partial» := false,
+      partialVerified := false, publishAuthorized := false,
+      cancelRequested := false,
       readers := 0, writer := false }
   assertEqual "stale partial can coexist with a verified publication"
     stalePartialInitial
     { published := true, publishedVerified := true, «partial» := true,
+      partialVerified := false, publishAuthorized := false,
+      cancelRequested := false,
       readers := 0, writer := false }
   assertEqual "busy remove leaves the state unchanged"
     (step busyRemoveInitial .remove)
@@ -62,7 +70,29 @@ def main : IO Unit := do
   assertEqual "successful remove clears both artifacts"
     (step stalePartialInitial .remove)
     { published := false, publishedVerified := false, «partial» := false,
+      partialVerified := false, publishAuthorized := false,
+      cancelRequested := false,
       readers := 0, writer := false }
   assertEqual "remove is idempotent"
     (step (step stalePartialInitial .remove) .remove)
     (step stalePartialInitial .remove)
+  assertEqual "unverified partial cannot be authorized"
+    (step { publishedInitial with writer := true, «partial» := true }
+      .authorizePublish)
+    { publishedInitial with writer := true, «partial» := true }
+  let cancelledBeforeAuthorization :=
+    run { publishedInitial with published := false, publishedVerified := false }
+      [.beginInstall, .createPartial, .verifyPartial, .requestCancel,
+        .authorizePublish, .publish]
+  assertEqual "cancellation before authorization blocks publication"
+    cancelledBeforeAuthorization
+    { published := false, publishedVerified := false, «partial» := true,
+      partialVerified := true, publishAuthorized := false,
+      cancelRequested := true, readers := 0, writer := true }
+  let authorizedThenCancelled :=
+    run publishedInitial
+      [.beginInstall, .createPartial, .verifyPartial, .authorizePublish,
+        .requestCancel, .publish]
+  assertEqual "cancellation after authorization does not block publication"
+    authorizedThenCancelled
+    { publishedInitial with cancelRequested := true }
