@@ -16,7 +16,7 @@ use crate::engine::{
 };
 use crate::engine_artifact::{EngineSpec, EngineStore};
 use crate::output::{atomic_write, validate_output_target};
-use crate::{ModelId, ModelStore, RuntimeError, decode_to_pcm};
+use crate::{ModelId, ModelManifest, ModelStore, RuntimeError, decode_to_pcm};
 
 const JOB_PREFIX: &str = "yasumaro-job-";
 const OWNER_MARKER: &str = ".yasumaro-owner";
@@ -27,6 +27,7 @@ const STALE_AGE: Duration = Duration::from_hours(24);
 pub struct RuntimeServices<'a> {
     engine_store: &'a EngineStore,
     engine_spec: &'a EngineSpec,
+    model_manifest: &'a ModelManifest,
     model_store: &'a ModelStore,
     diarizer: &'a dyn Diarizer,
     temp_root: &'a Path,
@@ -37,6 +38,7 @@ impl<'a> RuntimeServices<'a> {
     pub const fn new(
         engine_store: &'a EngineStore,
         engine_spec: &'a EngineSpec,
+        model_manifest: &'a ModelManifest,
         model_store: &'a ModelStore,
         diarizer: &'a dyn Diarizer,
         temp_root: &'a Path,
@@ -44,6 +46,7 @@ impl<'a> RuntimeServices<'a> {
         Self {
             engine_store,
             engine_spec,
+            model_manifest,
             model_store,
             diarizer,
             temp_root,
@@ -94,7 +97,8 @@ pub fn run_transcription(
 
     let installed = services.engine_store.require(services.engine_spec)?;
     let lease = installed.acquire()?;
-    let whisper_model = services.model_store.acquire(options.whisper_model)?;
+    let whisper_spec = services.model_manifest.spec(options.whisper_model)?;
+    let whisper_model = services.model_store.acquire(whisper_spec)?;
     let transcriber =
         WhisperProcessTranscriber::new(lease, whisper_model, job.path().to_path_buf())
             .map_err(|error| map_transcription_error(&error))?;

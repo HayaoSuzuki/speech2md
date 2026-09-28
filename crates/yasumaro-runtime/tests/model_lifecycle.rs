@@ -1,8 +1,10 @@
 use std::fs;
 use std::time::{Duration, Instant};
 
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
-use yasumaro_runtime::{ModelError, ModelId, ModelStore};
+use url::Url;
+use yasumaro_runtime::{ModelError, ModelId, ModelSpec, ModelStore};
 
 const MODEL: ModelId = ModelId::WhisperBase;
 const FINAL_NAME: &str = "ggml-base.bin";
@@ -14,13 +16,49 @@ fn store() -> (TempDir, ModelStore) {
     (root, store)
 }
 
+fn spec(id: ModelId, file_name: &str, bytes: &[u8]) -> ModelSpec {
+    ModelSpec {
+        id,
+        engine_version: "test".into(),
+        url: Url::parse("https://example.invalid/model").expect("fixture URL"),
+        size: u64::try_from(bytes.len()).expect("fixture length fits u64"),
+        sha256: format!("{:x}", Sha256::digest(bytes)),
+        license: "CC0-1.0".into(),
+        file_name: file_name.into(),
+    }
+}
+
+#[test]
+fn acquire_rejects_corrupt_regular_files_for_all_transcription_models() {
+    let expected = b"expected";
+    for (id, file_name) in [
+        (ModelId::WhisperBase, "ggml-base.bin"),
+        (ModelId::SpeakerSegmentation, "segmentation-3-0.onnx"),
+        (
+            ModelId::SpeakerEmbedding,
+            "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
+        ),
+    ] {
+        let (root, store) = store();
+        fs::write(root.path().join(file_name), b"corrupt!").expect("write corrupt model");
+        let model = spec(id, file_name, expected);
+
+        assert!(matches!(
+            store.acquire(&model),
+            Err(ModelError::HashMismatch { id: actual, .. }) if actual == id
+        ));
+    }
+}
+
 #[test]
 fn acquire_holds_a_shared_lease_for_a_regular_model() {
     let (root, store) = store();
     let final_path = root.path().join(FINAL_NAME);
-    fs::write(&final_path, b"verified model").expect("write model");
+    let bytes = b"verified model";
+    fs::write(&final_path, bytes).expect("write model");
+    let model = spec(MODEL, FINAL_NAME, bytes);
 
-    let lease = store.acquire(MODEL).expect("acquire model lease");
+    let lease = store.acquire(&model).expect("acquire model lease");
 
     assert_eq!(lease.path(), final_path);
     assert!(matches!(
@@ -56,8 +94,10 @@ fn remove_is_idempotent_and_deletes_partial_before_final() {
 #[test]
 fn remove_returns_model_in_use_without_waiting() {
     let (root, store) = store();
-    fs::write(root.path().join(FINAL_NAME), b"verified model").expect("write model");
-    let _lease = store.acquire(MODEL).expect("acquire model lease");
+    let bytes = b"verified model";
+    fs::write(root.path().join(FINAL_NAME), bytes).expect("write model");
+    let model = spec(MODEL, FINAL_NAME, bytes);
+    let _lease = store.acquire(&model).expect("acquire model lease");
 
     let started = Instant::now();
     let error = store.remove(MODEL).expect_err("busy model is rejected");
@@ -140,7 +180,7 @@ fn require_and_acquire_reject_a_model_symlink() {
         Err(ModelError::MissingModel { id: MODEL, .. })
     ));
     assert!(matches!(
-        store.acquire(MODEL),
+        store.acquire(&spec(MODEL, FINAL_NAME, b"outside model")),
         Err(ModelError::MissingModel { id: MODEL, .. })
     ));
 }

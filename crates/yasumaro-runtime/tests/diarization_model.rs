@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use yasumaro_runtime::engine::{DiarizationRequest, Diarizer, SherpaDiarizer};
-use yasumaro_runtime::{ModelId, ModelStore, decode_to_pcm};
+use yasumaro_runtime::{ModelId, ModelManifest, ModelStore, decode_to_pcm};
 
 #[test]
 #[ignore = "requires locally installed speaker models and a local four-speaker fixture"]
@@ -21,11 +21,20 @@ fn diarizes_a_local_four_speaker_fixture_without_downloading() {
     let pcm = decode_to_pcm(&fixture, temporary.path()).expect("decode fixture");
     let threads = std::thread::available_parallelism().map_or(1, usize::from);
     let model_store = ModelStore::new(model_root);
+    let manifest = ModelManifest::embedded().expect("embedded model manifest");
     let segmentation = model_store
-        .acquire(ModelId::SpeakerSegmentation)
+        .acquire(
+            manifest
+                .spec(ModelId::SpeakerSegmentation)
+                .expect("segmentation specification"),
+        )
         .expect("installed speaker segmentation model");
     let embedding = model_store
-        .acquire(ModelId::SpeakerEmbedding)
+        .acquire(
+            manifest
+                .spec(ModelId::SpeakerEmbedding)
+                .expect("embedding specification"),
+        )
         .expect("installed speaker embedding model");
     let diarizer =
         SherpaDiarizer::new(segmentation, embedding, threads).expect("initialize sherpa-onnx");

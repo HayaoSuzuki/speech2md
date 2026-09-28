@@ -15,7 +15,7 @@ use yasumaro_runtime::engine::{
     EngineError, Transcriber, TranscriptionRequest, WhisperProcessTranscriber,
 };
 use yasumaro_runtime::engine_artifact::{EngineSpec, EngineStore, Platform};
-use yasumaro_runtime::{ModelError, ModelId, ModelStore};
+use yasumaro_runtime::{ModelError, ModelId, ModelSpec, ModelStore};
 
 const PROMPT_SENTINEL: &str = "機密-PROMPT-7e18b1";
 
@@ -38,6 +38,7 @@ struct Fixture {
     capture: PathBuf,
     spec: EngineSpec,
     store: EngineStore,
+    model_spec: ModelSpec,
     model_store: ModelStore,
 }
 
@@ -85,21 +86,28 @@ impl Fixture {
         let model_root = root.path().join("models");
         fs::create_dir_all(&model_root).expect("create model root");
         let model = model_root.join("ggml-base.bin");
-        fs::write(
-            &model,
-            serde_json::to_vec(&Control {
-                mode,
-                capture: &capture,
-            })
-            .expect("serialize control"),
-        )
-        .expect("write control model");
+        let model_bytes = serde_json::to_vec(&Control {
+            mode,
+            capture: &capture,
+        })
+        .expect("serialize control");
+        fs::write(&model, &model_bytes).expect("write control model");
+        let model_spec = ModelSpec {
+            id: ModelId::WhisperBase,
+            engine_version: "test".into(),
+            url: Url::parse("https://example.invalid/model").expect("model URL"),
+            size: u64::try_from(model_bytes.len()).expect("model length fits u64"),
+            sha256: format!("{:x}", Sha256::digest(&model_bytes)),
+            license: "CC0-1.0".into(),
+            file_name: "ggml-base.bin".into(),
+        };
         Self {
             _root: root,
             temp_root,
             capture,
             spec,
             store: EngineStore::new(engine_root),
+            model_spec,
             model_store: ModelStore::new(model_root),
         }
     }
@@ -113,7 +121,7 @@ impl Fixture {
             .expect("lease fake engine");
         let model = self
             .model_store
-            .acquire(ModelId::WhisperBase)
+            .acquire(&self.model_spec)
             .expect("lease fake model");
         WhisperProcessTranscriber::new(lease, model, self.temp_root.clone())
             .expect("construct transcriber")
@@ -128,7 +136,7 @@ impl Fixture {
             .expect("lease fake engine");
         let model = self
             .model_store
-            .acquire(ModelId::WhisperBase)
+            .acquire(&self.model_spec)
             .expect("lease fake model");
         WhisperProcessTranscriber::new_for_test(
             lease,
@@ -174,7 +182,7 @@ fn whisper_transcriber_holds_the_model_lease_until_drop() {
         .expect("lease fake engine");
     let model = fixture
         .model_store
-        .acquire(ModelId::WhisperBase)
+        .acquire(&fixture.model_spec)
         .expect("lease fake model");
     let transcriber = WhisperProcessTranscriber::new(engine, model, fixture.temp_root.clone())
         .expect("construct transcriber");
@@ -203,7 +211,7 @@ fn whisper_constructor_failure_releases_the_model_lease() {
         .expect("lease fake engine");
     let model = fixture
         .model_store
-        .acquire(ModelId::WhisperBase)
+        .acquire(&fixture.model_spec)
         .expect("lease fake model");
 
     assert!(matches!(

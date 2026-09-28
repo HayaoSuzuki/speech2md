@@ -14,7 +14,7 @@ use yasumaro_runtime::engine::{
 use yasumaro_runtime::engine_artifact::{
     EngineManifest, EngineRootResolver, EngineStore, Platform,
 };
-use yasumaro_runtime::{ModelId, ModelRootResolver, ModelStore, decode_to_pcm};
+use yasumaro_runtime::{ModelId, ModelManifest, ModelRootResolver, ModelStore, decode_to_pcm};
 
 const MANIFEST_FILE: &str = "evaluation.json";
 
@@ -145,17 +145,30 @@ fn measure_case(
         .expect("installed whisper engine")
         .acquire()
         .expect("whisper engine lease");
+    let manifest = ModelManifest::embedded().expect("embedded model manifest");
     let whisper_model = model_store
-        .acquire(ModelId::WhisperBase)
+        .acquire(
+            manifest
+                .spec(ModelId::WhisperBase)
+                .expect("whisper base specification"),
+        )
         .expect("installed whisper base model");
     let transcriber =
         WhisperProcessTranscriber::new(lease, whisper_model, case_temp.path().to_path_buf())
             .expect("initialize whisper process adapter");
     let segmentation = model_store
-        .acquire(ModelId::SpeakerSegmentation)
+        .acquire(
+            manifest
+                .spec(ModelId::SpeakerSegmentation)
+                .expect("segmentation specification"),
+        )
         .expect("installed speaker segmentation model");
     let embedding = model_store
-        .acquire(ModelId::SpeakerEmbedding)
+        .acquire(
+            manifest
+                .spec(ModelId::SpeakerEmbedding)
+                .expect("embedding specification"),
+        )
         .expect("installed speaker embedding model");
     let diarizer =
         SherpaDiarizer::new(segmentation, embedding, threads).expect("initialize speaker diarizer");

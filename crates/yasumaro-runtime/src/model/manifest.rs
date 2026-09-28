@@ -104,7 +104,12 @@ impl ModelManifest {
         &self.models
     }
 
-    pub(super) fn spec(&self, id: ModelId) -> Result<&ModelSpec, ModelError> {
+    /// Returns the verified manifest entry for a model identifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the manifest has no entry for `id`.
+    pub fn spec(&self, id: ModelId) -> Result<&ModelSpec, ModelError> {
         self.models
             .iter()
             .find(|spec| spec.id == id)

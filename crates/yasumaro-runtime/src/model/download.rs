@@ -2,6 +2,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 use std::time::Duration;
 
 use reqwest::blocking::Client;
@@ -12,6 +13,7 @@ use super::{ModelError, ModelId, ModelManifest, ModelSpec, ModelStore};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
+const LOCK_RETRY_DELAY: Duration = Duration::from_millis(25);
 const BUFFER_SIZE: usize = 64 * 1_024;
 
 pub struct ModelInstaller {
@@ -96,11 +98,13 @@ impl ModelInstaller {
     }
 
     fn install_one(&self, spec: &ModelSpec, cancelled: &AtomicBool) -> Result<(), ModelError> {
-        let _lock = self.store.lock_exclusive(spec.id)?;
+        let _lock = self.lock_with_cancellation(spec.id, cancelled)?;
+        check_cancelled(spec.id, cancelled)?;
         let paths = self.store.paths(spec.id);
         remove_entry(&paths.partial_path)?;
 
-        if Self::existing_final_is_valid(spec, &paths.final_path)? {
+        if Self::existing_final_is_valid(spec, &paths.final_path, cancelled)? {
+            check_cancelled(spec.id, cancelled)?;
             tracing::info!(
                 target: "yasumaro_runtime::model",
                 model_id = %spec.id,
@@ -136,7 +140,26 @@ impl ModelInstaller {
         Ok(())
     }
 
-    fn existing_final_is_valid(spec: &ModelSpec, path: &Path) -> Result<bool, ModelError> {
+    fn lock_with_cancellation(
+        &self,
+        id: ModelId,
+        cancelled: &AtomicBool,
+    ) -> Result<File, ModelError> {
+        loop {
+            check_cancelled(id, cancelled)?;
+            if let Some(lock) = self.store.try_lock_exclusive(id)? {
+                return Ok(lock);
+            }
+            thread::sleep(LOCK_RETRY_DELAY);
+        }
+    }
+
+    fn existing_final_is_valid(
+        spec: &ModelSpec,
+        path: &Path,
+        cancelled: &AtomicBool,
+    ) -> Result<bool, ModelError> {
+        check_cancelled(spec.id, cancelled)?;
         let metadata = match fs::symlink_metadata(path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
@@ -151,7 +174,7 @@ impl ModelInstaller {
         }
         let mut file =
             File::open(path).map_err(|error| storage_error("open final model", &error))?;
-        let (size, hash) = read_size_and_hash(&mut file)?;
+        let (size, hash) = read_size_and_hash(&mut file, spec.id, cancelled)?;
         Ok(size == spec.size && hash == spec.sha256)
     }
 
@@ -248,11 +271,16 @@ impl ModelInstaller {
     }
 }
 
-fn read_size_and_hash(reader: &mut impl Read) -> Result<(u64, String), ModelError> {
+fn read_size_and_hash(
+    reader: &mut impl Read,
+    id: ModelId,
+    cancelled: &AtomicBool,
+) -> Result<(u64, String), ModelError> {
     let mut size = 0_u64;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0_u8; BUFFER_SIZE].into_boxed_slice();
     loop {
+        check_cancelled(id, cancelled)?;
         let count = reader
             .read(&mut buffer)
             .map_err(|error| storage_error("read final model", &error))?;
@@ -268,7 +296,16 @@ fn read_size_and_hash(reader: &mut impl Read) -> Result<(u64, String), ModelErro
             .ok_or_else(|| ModelError::Storage("count final bytes: overflow".into()))?;
         hasher.update(&buffer[..count]);
     }
+    check_cancelled(id, cancelled)?;
     Ok((size, format!("{:x}", hasher.finalize())))
+}
+
+fn check_cancelled(id: ModelId, cancelled: &AtomicBool) -> Result<(), ModelError> {
+    if cancelled.load(Ordering::Acquire) {
+        Err(ModelError::Cancelled { id })
+    } else {
+        Ok(())
+    }
 }
 
 fn publish_verified(partial_path: &Path, final_path: &Path) -> Result<(), ModelError> {

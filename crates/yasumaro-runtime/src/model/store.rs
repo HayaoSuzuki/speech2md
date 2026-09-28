@@ -1,15 +1,17 @@
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
-use std::io;
+use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
 use fs4::fs_std::FileExt as _;
+use sha2::{Digest, Sha256};
 
-use super::{ModelError, ModelId};
+use super::{ModelError, ModelId, ModelSpec};
 
 const MODEL_DIRECTORY_ENV: &str = "YASUMARO_MODEL_DIR";
+const VERIFY_BUFFER_SIZE: usize = 64 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct ModelStore {
@@ -63,13 +65,14 @@ impl ModelStore {
             .ok_or_else(|| missing_model(id))
     }
 
-    /// Acquires a shared lease for an installed regular model file.
+    /// Acquires a shared lease after verifying the installed model against its manifest entry.
     ///
     /// # Errors
     ///
-    /// Returns an error when locking fails or the model is not a regular file after the lock is
-    /// acquired.
-    pub fn acquire(&self, id: ModelId) -> Result<ModelLease, ModelError> {
+    /// Returns an error when locking fails, the model is not a regular file, or its complete size
+    /// and SHA-256 do not match `spec` after the lock is acquired.
+    pub fn acquire(&self, spec: &ModelSpec) -> Result<ModelLease, ModelError> {
+        let id = spec.id;
         let lock = self.open_lock(id)?;
         lock.lock_shared()
             .map_err(|error| lock_error(id, "acquire shared lock", &error))?;
@@ -77,6 +80,7 @@ impl ModelStore {
         if !is_regular_file(&path) {
             return Err(missing_model(id));
         }
+        verify_file(spec, &path)?;
         Ok(ModelLease { path, _lock: lock })
     }
 
@@ -87,11 +91,7 @@ impl ModelStore {
     /// Returns [`ModelError::ModelInUse`] when the model lock is busy. Lock setup and filesystem
     /// failures retain their distinct error classifications.
     pub fn remove(&self, id: ModelId) -> Result<(), ModelError> {
-        let lock = self.open_lock(id)?;
-        if lock
-            .try_lock_exclusive()
-            .map_err(|error| lock_error(id, "try exclusive lock", &error))?
-        {
+        if let Some(_lock) = self.try_lock_exclusive(id)? {
             let paths = self.paths(id);
             remove_entry(&paths.partial_path)?;
             remove_entry(&paths.final_path)
@@ -100,11 +100,11 @@ impl ModelStore {
         }
     }
 
-    pub(super) fn lock_exclusive(&self, id: ModelId) -> Result<File, ModelError> {
+    pub(super) fn try_lock_exclusive(&self, id: ModelId) -> Result<Option<File>, ModelError> {
         let lock = self.open_lock(id)?;
-        lock.lock_exclusive()
-            .map_err(|error| lock_error(id, "acquire exclusive lock", &error))?;
-        Ok(lock)
+        lock.try_lock_exclusive()
+            .map(|acquired| acquired.then_some(lock))
+            .map_err(|error| lock_error(id, "try exclusive lock", &error))
     }
 
     pub(super) fn paths(&self, id: ModelId) -> ModelPaths {
@@ -133,6 +133,44 @@ impl ModelStore {
             .open(lock_directory.join(format!("{id}.lock")))
             .map_err(|error| lock_error(id, "open lock file", &error))
     }
+}
+
+fn verify_file(spec: &ModelSpec, path: &Path) -> Result<(), ModelError> {
+    let mut file = File::open(path).map_err(|error| storage_error("open final model", &error))?;
+    let mut size = 0_u64;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; VERIFY_BUFFER_SIZE].into_boxed_slice();
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|error| storage_error("read final model", &error))?;
+        if count == 0 {
+            break;
+        }
+        size = size
+            .checked_add(
+                u64::try_from(count)
+                    .map_err(|_| ModelError::Storage("count final bytes: overflow".into()))?,
+            )
+            .ok_or_else(|| ModelError::Storage("count final bytes: overflow".into()))?;
+        hasher.update(&buffer[..count]);
+    }
+    if size != spec.size {
+        return Err(ModelError::SizeMismatch {
+            id: spec.id,
+            expected: spec.size,
+            actual: size,
+        });
+    }
+    let actual = format!("{:x}", hasher.finalize());
+    if actual != spec.sha256 {
+        return Err(ModelError::HashMismatch {
+            id: spec.id,
+            expected: spec.sha256.clone(),
+            actual,
+        });
+    }
+    Ok(())
 }
 
 pub(super) fn remove_entry(path: &Path) -> Result<(), ModelError> {

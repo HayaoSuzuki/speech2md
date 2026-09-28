@@ -265,11 +265,26 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
+    use sha2::{Digest, Sha256};
+    use url::Url;
+
     use super::{
         DiarizationRequest, NativeSegment, SherpaDiarizer, build_config, convert_segments,
     };
     use crate::engine::EngineError;
-    use crate::{ModelId, ModelStore};
+    use crate::{ModelId, ModelSpec, ModelStore};
+
+    fn model_spec(id: ModelId, file_name: &str, bytes: &[u8]) -> ModelSpec {
+        ModelSpec {
+            id,
+            engine_version: "test".into(),
+            url: Url::parse("https://example.invalid/model").expect("fixture URL"),
+            size: u64::try_from(bytes.len()).expect("fixture length fits u64"),
+            sha256: format!("{:x}", Sha256::digest(bytes)),
+            license: "CC0-1.0".into(),
+            file_name: file_name.into(),
+        }
+    }
 
     #[test]
     fn rejects_zero_as_an_exact_speaker_count() {
@@ -316,20 +331,35 @@ mod tests {
     #[test]
     fn constructor_failure_releases_both_model_leases() {
         let root = tempfile::tempdir().expect("temporary model root");
-        fs::write(root.path().join("segmentation-3-0.onnx"), b"segmentation")
-            .expect("write segmentation model");
+        let segmentation_bytes = b"segmentation";
+        let embedding_bytes = b"embedding";
+        fs::write(
+            root.path().join("segmentation-3-0.onnx"),
+            segmentation_bytes,
+        )
+        .expect("write segmentation model");
         fs::write(
             root.path()
                 .join("3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"),
-            b"embedding",
+            embedding_bytes,
         )
         .expect("write embedding model");
         let store = ModelStore::new(root.path());
+        let segmentation_spec = model_spec(
+            ModelId::SpeakerSegmentation,
+            "segmentation-3-0.onnx",
+            segmentation_bytes,
+        );
+        let embedding_spec = model_spec(
+            ModelId::SpeakerEmbedding,
+            "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
+            embedding_bytes,
+        );
         let segmentation = store
-            .acquire(ModelId::SpeakerSegmentation)
+            .acquire(&segmentation_spec)
             .expect("lease segmentation model");
         let embedding = store
-            .acquire(ModelId::SpeakerEmbedding)
+            .acquire(&embedding_spec)
             .expect("lease embedding model");
 
         assert!(matches!(

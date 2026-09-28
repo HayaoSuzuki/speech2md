@@ -165,10 +165,11 @@ fn execute_transcribe(arguments: &TranscribeArgs) -> Result<String, AppError> {
     let platform = Platform::current()?;
     let engine_spec = engine_manifest.select(platform)?;
     let engine_store = EngineStore::new(EngineRootResolver::resolve()?);
+    let model_manifest = ModelManifest::embedded()?;
     let model_store = ModelStore::new(ModelRootResolver::resolve()?);
     let threads = std::thread::available_parallelism().map_or(1, usize::from);
-    let segmentation = model_store.acquire(ModelId::SpeakerSegmentation)?;
-    let embedding = model_store.acquire(ModelId::SpeakerEmbedding)?;
+    let segmentation = model_store.acquire(model_manifest.spec(ModelId::SpeakerSegmentation)?)?;
+    let embedding = model_store.acquire(model_manifest.spec(ModelId::SpeakerEmbedding)?)?;
     let diarizer = SherpaDiarizer::new(segmentation, embedding, threads)
         .map_err(|error| RuntimeError::Diarization(error.to_string()))?;
     let cancelled = cancellation_flag()?;
@@ -191,6 +192,7 @@ fn execute_transcribe(arguments: &TranscribeArgs) -> Result<String, AppError> {
     let services = RuntimeServices::new(
         &engine_store,
         engine_spec,
+        &model_manifest,
         &model_store,
         &diarizer,
         &temp_root,

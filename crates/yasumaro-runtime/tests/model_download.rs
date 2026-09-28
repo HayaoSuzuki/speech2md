@@ -515,7 +515,14 @@ fn install_waits_for_an_active_model_lease() {
     let root = TempDir::new().expect("temporary model root");
     std::fs::write(root.path().join(FINAL_NAME), b"leased old model").expect("write leased model");
     let store = ModelStore::new(root.path());
-    let lease = store.acquire(MODEL).expect("acquire model lease");
+    let leased_manifest = manifest(
+        "http://127.0.0.1:9/not-used",
+        b"leased old model",
+        sha256(b"leased old model"),
+    );
+    let lease = store
+        .acquire(leased_manifest.spec(MODEL).expect("leased specification"))
+        .expect("acquire model lease");
     let installer = installer(
         &root,
         &url,
@@ -547,6 +554,78 @@ fn install_waits_for_an_active_model_lease() {
     assert_eq!(
         std::fs::read(root.path().join(FINAL_NAME)).expect("read replacement model"),
         replacement
+    );
+}
+
+#[test]
+fn cancelled_install_stops_waiting_for_an_active_model_lease() {
+    let bytes = b"verified leased model";
+    let root = TempDir::new().expect("temporary model root");
+    std::fs::write(root.path().join(FINAL_NAME), bytes).expect("write leased model");
+    let store = ModelStore::new(root.path());
+    let leased_manifest = manifest("http://127.0.0.1:9/not-used", bytes, sha256(bytes));
+    let lease = store
+        .acquire(leased_manifest.spec(MODEL).expect("leased specification"))
+        .expect("acquire model lease");
+    let installer = installer(
+        &root,
+        "http://127.0.0.1:9/not-used",
+        bytes,
+        sha256(bytes),
+        Duration::from_secs(1),
+    );
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let worker_flag = Arc::clone(&cancelled);
+    let (started_tx, started_rx) = mpsc::channel();
+    let (result_tx, result_rx) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        started_tx.send(()).expect("signal installer start");
+        let result = installer.install_with_cancellation(&[MODEL], &worker_flag);
+        result_tx.send(result).expect("send install result");
+    });
+
+    started_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("installer starts");
+    cancelled.store(true, Ordering::Release);
+    let prompt = result_rx.recv_timeout(Duration::from_millis(250));
+    drop(lease);
+    let completed_before_release = prompt.is_ok();
+    let result = prompt.unwrap_or_else(|_| {
+        result_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("installer eventually exits")
+    });
+    worker.join().expect("installer worker exits");
+
+    assert!(
+        completed_before_release,
+        "cancellation must stop lock waiting before the lease is released"
+    );
+    assert_eq!(result, Err(ModelError::Cancelled { id: MODEL }));
+}
+
+#[test]
+fn pre_cancelled_install_does_not_reuse_a_valid_final() {
+    let bytes = b"verified model";
+    let root = TempDir::new().expect("temporary model root");
+    std::fs::write(root.path().join(FINAL_NAME), bytes).expect("write final model");
+    let installer = installer(
+        &root,
+        "http://127.0.0.1:9/not-used",
+        bytes,
+        sha256(bytes),
+        Duration::from_secs(1),
+    );
+    let cancelled = AtomicBool::new(true);
+
+    assert_eq!(
+        installer.install_with_cancellation(&[MODEL], &cancelled),
+        Err(ModelError::Cancelled { id: MODEL })
+    );
+    assert_eq!(
+        std::fs::read(root.path().join(FINAL_NAME)).expect("valid final remains"),
+        bytes
     );
 }
 

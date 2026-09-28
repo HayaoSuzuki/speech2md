@@ -235,3 +235,29 @@ Leanの`step_preserves`と`run_preserves`は、検証前の公開禁止とreader
 formal workflowは`pull_request`、`merge_group`、`workflow_dispatch`で起動し、Ubuntu 22.04、20分上限、read-only contents permissionを使う。`leanprover/lean-action@v1`へ`formal` package、auto-config無効、build有効、testとlint無効を渡し、その後に`formal`をworking directoryとして`lake exe YasumaroTests`を実行する。
 
 開発文書とtesting文書の相対linkは実在するfileを指す。README parser testは新しいremove例を含む。今回のmodel lifecycle実装に`If-Range`、`Content-Range`、`part.json`、publish backupはなく、該当語は設計・計画の対象外説明または無関係な出力fileのatomic writeに限られる。placeholderや未決定事項は追加していない。
+
+## 最終ブランチレビュー
+
+### 第1巡: 要件レビュー
+
+基点`de0ec73`からの8 commitを設計書の完了条件へ対応づけた。設計・計画は`d8d2f8d`と`04223b3`、Lean状態機械は`3740993`、lock・lease・removeは`b3a8082`、fresh downloadとcleanupは`7296474`、transcribe leaseは`969b780`、CLI removeとcancelは`b06a492`、文書とformal CIは`6728722`にある。
+
+fresh reviewerは、remove、cleanup、lock分類、非再帰削除、lease drop順、CLIのsort・dedup・途中停止、URLとpathの非露出を要件どおりと判定した。一方、`ModelStore::acquire`がregular fileだけを検査しており、マニフェストと異なるfileを文字起こしへ渡せるというImportantを指摘した。
+
+修正: `ModelStore::acquire`は`ModelSpec`を要求し、共有lock取得後に全体サイズとSHA-256を検証してからだけ`ModelLease`を返す。Whisper、話者区間、話者埋め込みの3経路をverified leaseへ変更した。`acquire_rejects_corrupt_regular_files_for_all_transcription_models`は旧実装で型不一致のRED、新実装でGREENになった。
+
+### 第2巡: 状態・安全性レビュー
+
+fresh reviewerは、CLIがCtrl+Cをflagへ変換した後もinstallがblocking lock取得で待ち続け、valid finalの検証中と成功return前にcancelを確認しないImportantを指摘した。この状態では長いtranscribeの終了までcancelが反映されず、その後に成功を返す可能性があった。
+
+修正: installは25ミリ秒間隔の非待機排他lock試行へ変更し、各試行前、lock取得直後、既存finalの各hash chunk、valid finalの成功return前にflagを確認する。待機中のcancelでは他processのpartialへ触れず`Cancelled`を返す。`cancelled_install_stops_waiting_for_an_active_model_lease`と`pre_cancelled_install_does_not_reuse_a_valid_final`はいずれも旧実装でRED、新実装でGREENになった。通常のinstallがlease解放後に成功する既存testも再確認した。
+
+Leanの`publishedVerified`とRustのlease境界は、確定名の存在ではなくmanifestとの全体一致で接続された。外部processがlockを無視してlease取得後にfileを書き換える操作は、設計書どおり状態機械の対象外である。
+
+### 第3巡: 実装品質レビュー
+
+fresh reviewerのCriticalは0件だった。Minorとして、HTTP client構築errorがrequest前のため常に`whisper-base`を表示する点が残った。これは通常のHTTP・filesystem error分類やmodel lifecycle状態を変えず、client builderが失敗する稀な初期化経路の表示精度に限られるため、今回の一回のfix passには含めない。
+
+reviewerが判断を留保したWindows固有のlock・rename・directory symlink、SIGKILL時点のdurability、実native inference、disk-full・permission・`sync_all`の実faultは、ローカル成功として扱わない。SIGKILL時点のcleanupは承認済み対象外であり、次回cleanupだけを保証する。実model依存の5 testはignoredのままである。Windows、Linux、macOSのCIはbranchをremoteへ送っていないため未実行であり、merge前の必須確認として残す。
+
+修正後の`cargo fmt`、全target・全featureの厳格Clippy、workspace全testは成功した。workspace testは179件成功、実model・fixture依存の5件だけがignoredだった。Lean buildと`YasumaroTests`も成功し、禁止したresume、sidecar、backup用実装は見つからなかった。
