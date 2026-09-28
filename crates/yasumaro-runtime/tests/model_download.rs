@@ -429,28 +429,34 @@ fn cancellation_stops_a_stalled_response_body_without_server_progress() {
 
 #[test]
 fn progressing_response_is_not_limited_by_the_read_timeout_total() {
-    let bytes = b"abcde";
+    const CHUNK_SIZE: usize = 8 * 1_024;
+    const CHUNK_COUNT: usize = 7;
+    const CHUNK_INTERVAL: Duration = Duration::from_millis(100);
+    const TEST_READ_TIMEOUT: Duration = Duration::from_millis(500);
+
+    let bytes = vec![b'x'; CHUNK_SIZE * CHUNK_COUNT];
+    let response_bytes = bytes.clone();
     let (url, server) = spawn_server(move |mut stream| {
         stream
             .set_nodelay(true)
-            .expect("send each progress byte without Nagle buffering");
+            .expect("send each progress chunk without Nagle buffering");
         let _request = read_request(&mut stream);
         write!(
             stream,
             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            bytes.len()
+            response_bytes.len()
         )
         .expect("write headers");
-        for byte in bytes {
-            stream
-                .write_all(std::slice::from_ref(byte))
-                .expect("write chunk");
+        for (index, chunk) in response_bytes.chunks(CHUNK_SIZE).enumerate() {
+            stream.write_all(chunk).expect("write chunk");
             stream.flush().expect("flush chunk");
-            thread::sleep(Duration::from_millis(40));
+            if index + 1 < CHUNK_COUNT {
+                thread::sleep(CHUNK_INTERVAL);
+            }
         }
     });
     let root = TempDir::new().expect("temporary model root");
-    let installer = installer(&root, &url, bytes, sha256(bytes), Duration::from_millis(80));
+    let installer = installer(&root, &url, &bytes, sha256(&bytes), TEST_READ_TIMEOUT);
 
     installer
         .install(&[MODEL])

@@ -523,14 +523,16 @@ cargo run -p yasumaro-runtime --example model_lifecycle_oracle --features test-s
 
 macOSのx86_64とarm64で、`progressing_response_is_not_limited_by_the_read_timeout_total`だけが`request timed out`になった。productionのread timeout契約は、受信が継続する限り総所要時間だけでは失敗しないことである。テストは1バイトを40ミリ秒間隔で送る一方、read timeoutを80ミリ秒にしていた。
 
-指摘: test serverの`TcpStream::flush`は各1バイトを直ちにTCPへ送出することを保証せず、TCP_NODELAYも設定していなかった。このためNagle bufferingと遅延ACKの組合せにより、clientが観測する無進捗時間が80ミリ秒を超え得る。
+指摘: test serverの`TcpStream::flush`は各1バイトを直ちにTCPへ送出することを保証せず、TCP_NODELAYも設定していなかった。またreqwest 0.12の実装確認により、read timeoutはbody frameだけでなくresponse header待ちにもrequest開始時から適用されることが分かった。80ミリ秒ではserver threadの起動、accept、header生成に対する余裕がなく、40ミリ秒のchunk間隔に対しても2倍の余裕しかなかった。
 
-修正: 該当testのserver socketだけに`set_nodelay(true)`を設定した。production timeout値とdownload処理は変更していない。
+最初の修正: 該当testのserver socketだけに`set_nodelay(true)`を設定した。しかしremoteのmacOS x86_64とarm64は同じtimeoutで再び失敗したため、Nagle bufferingだけが原因という仮説は棄却した。
+
+最終修正: TCP_NODELAYに加え、test用read timeoutを500ミリ秒、chunk間隔を100ミリ秒、chunk数を7、各chunkを8KiBとした。header待ちとchunk間の無進捗には5倍の余裕があり、最後のchunkは開始から約600ミリ秒後なので総時間制限へ変異すれば500ミリ秒で失敗する。production timeout値とdownload処理は変更していない。
 
 ### 第2巡: 状態・安全性レビュー
 
-この変更はLean状態、公開許可、partial cleanup、removeの遷移を変更しない。test serverが意図した1バイトごとの進捗をtransportへ反映するだけである。正常系testの総応答時間は引き続きread timeoutを超えるため、timeoutが誤って総時間制限へ変われば同じtestが失敗する。
+この変更はLean状態、公開許可、partial cleanup、removeの遷移を変更しない。test serverが意図したchunkごとの進捗をtransportへ反映し、CI schedulingの余裕だけを広げる。正常系testの総応答時間は引き続きread timeoutを超えるため、timeoutが誤って総時間制限へ変われば同じtestが失敗する。
 
 ### 第3巡: 実装品質レビュー
 
-TCP_NODELAYは全test共通helperではなく、細粒度の進捗を前提にする1件だけへ限定した。両macOS CIの同一failureをRED記録とし、ローカルでは修正前の同testを20回実行して20回成功したため、ローカル再現ではなくplatform依存のtransport条件として扱った。修正後は対象testの反復、model download test全体、workspace全体を再検証し、remote macOS CIを最終確認とする。
+TCP_NODELAYと拡張した時間比率は全test共通helperではなく、細粒度の進捗を前提にする1件だけへ限定した。両macOS CIの同一failureをRED記録とし、ローカルでは最初の修正前後に同testを各20回実行して成功したため、ローカル再現ではなくCI schedulingを含むplatform条件として扱った。最終修正後は対象testの反復、model download test全体、workspace全体を再検証し、remote macOS CIを最終確認とする。
