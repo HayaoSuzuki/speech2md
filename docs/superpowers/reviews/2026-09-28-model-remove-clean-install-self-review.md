@@ -281,3 +281,17 @@ reviewerが判断を留保したWindows固有のlock・rename・directory symlin
 HTTP処理だけを非同期化し、`ModelInstaller`の同期公開APIは維持する。production関数内の公開許可前後に`test-support`の同期点を置き、Rust adapterが同じ処理を観測できるようにした。Lean生成fixtureは`strict`、`internal-fixture`、`model-only`を区別し、期待値をRust側へ重複記述しない。
 
 HTTP clientと非同期runtimeの構築失敗はモデルを選ぶ前に起きるため、モデルIDを持たない`HttpClientInitialization`へ分類した。内部error文字列、URL、完全pathは表示しない。GitHub Issue本文の変更は外部操作として実装範囲に含めず、branch完成時にコメント案だけを提示する。
+
+## キャンセル境界と形式対応の実装計画
+
+### 第1巡: 要件レビュー
+
+計画の5 Taskを設計書の完了条件へ対応づけた。Task 1は状態機械と証明、Task 2はLean生成fixture、Task 3はネットワーク待機のキャンセル、Task 4は公開許可とRust oracle、Task 5はCIと文書を担当する。Range、validator、sidecar、backup、再開処理、GitHub Issueの外部変更を実装するstepはない。
+
+### 第2巡: 状態・安全性レビュー
+
+Task間のinterfaceは`State → Event → State`の壊れた遷移、schema version 1のfixture、公開許可前後のcheckpoint、oracleの3 modeで固定した。公開許可前と許可後のキャンセルを別testにし、同じflag変化を異なる期待結果へ対応づけた。未検証partialはLeanのnegative caseとRustのhash mismatch caseの双方でfinalを作らない。
+
+### 第3巡: 実装品質レビュー
+
+Review Focusの5項目には、それぞれTask 3またはTask 4のtest名と実行commandがある。read timeoutより短い間隔で進むresponseは旧実装でも成功するため、REDではなく非同期化前後のcharacterization testとして記録した。各Taskはtest追加、RED確認、最小実装、GREEN確認、3巡レビュー、commitの順になっている。placeholder、未定義の後続判断、期待値をRustへ重複記述するstepはない。
